@@ -1,0 +1,864 @@
+#pragma once
+
+namespace dynamic
+{
+
+//=============================================================================
+// ID implementations
+//=============================================================================
+
+inline ID& ID::operator=(ID const& o)
+{
+    std::vector<std::string>::operator=(o);
+    return *this;
+}
+
+inline ID& ID::operator=(ID && o)
+{
+    std::vector<std::string>::operator=(std::move(o));
+    return *this;
+}
+
+inline std::string ID::toString() const
+{
+    std::ostringstream ss;
+    std::copy(begin(), end(), std::ostream_iterator<std::string>(ss, "/"));
+    return ss.str().substr(0, ss.str().size() - 1);
+}
+
+inline ID ID::fromString(std::string const& path)
+{
+    ID elements;
+    std::istringstream ss(path);
+    for (std::string line; std::getline(ss, line, '/');)
+        elements.emplace_back(std::move(line));
+
+    return elements;
+}
+
+//=============================================================================
+// Value implementations
+//=============================================================================
+
+inline thread_local std::size_t Value::recursiveListenerDisabler = 0;
+
+inline Value::Value(Value const&) : parent(nullptr) {}
+
+inline Value::Value(Value&& o) : parent(nullptr)
+{
+    std::swap(parent, o.parent);
+}
+
+inline typename Value::TypesVariant Value::visit_helper()
+{
+    assert(false); /* crash! */
+    return *reinterpret_cast<TypesVariant*>(0);
+}
+
+inline typename Value::ConstTypesVariant Value::visit_helper() const
+{
+    assert(false); /* crash! */
+    return *reinterpret_cast<ConstTypesVariant*>(0);
+}
+
+template <typename Lambda>
+auto Value::visit(this auto&& self, Lambda && lambda) -> decltype(auto)
+{
+    static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
+
+    using NonPrimitiveArgumentTypes = std::tuple<Invalid, Object>;
+    using AllArgumentTypes = decltype(std::tuple_cat(std::declval<NonPrimitiveArgumentTypes>(), std::declval<SupportedFundamentalTypes>()));
+    using AllArgumentRefs = std::conditional_t<kIsConst, detail::transform_tuple<AllArgumentTypes, detail::add_const_lvalue_ref>::type,
+                                                         detail::transform_tuple<AllArgumentTypes, detail::add_lvalue_ref>::type>;
+    using SupportedArgumentsByLambda = decltype(detail::filter_tuple<detail::DoesLambdaSupportType<Lambda>::template Predicate>(std::declval<AllArgumentRefs>()));
+    static_assert(std::tuple_size_v<SupportedArgumentsByLambda> >= 1, "Your lambda must be callable with at least one of the types in SupportedFundamentalTypes");
+
+    using LambdaReturnTypes = detail::transform_tuple<SupportedArgumentsByLambda, detail::BindFirst<std::invoke_result_t, Lambda>::template Result>::type;
+    using LambdaReturnType = detail::apply_tuple<std::common_type, LambdaReturnTypes>::type::type;
+
+    using InvalidRef = std::conditional_t<kIsConst, Invalid const, Invalid>&;
+    using TypeErasedObjectRef = std::conditional_t<kIsConst, Object const, Object>&;
+
+    if constexpr (std::is_invocable_v<Lambda, InvalidRef>)
+    {
+        if (! self.isValid())
+            return lambda(static_cast<InvalidRef>(self));
+    }
+
+    if constexpr (std::is_invocable_v<Lambda, TypeErasedObjectRef>)
+    {
+        if (self.isStruct())
+            return lambda(static_cast<TypeErasedObjectRef>(self));
+    }
+
+    return std::visit([lambda_ = std::move(lambda), &self] <typename T> (std::reference_wrapper<T> v) -> LambdaReturnType
+    {
+        if constexpr (std::is_invocable_v<Lambda, T&>)
+        {
+            using Type = std::remove_const_t<T>;
+            static constexpr auto kIsPrimitive = (! std::is_same_v<Object, Type>) && (! std::is_same_v<Invalid, Type>);
+
+            if constexpr (kIsPrimitive && (! kIsConst))
+            {
+                Type copy(v.get());
+
+                if constexpr (! std::is_void_v<std::invoke_result_t<Lambda, T&>>)
+                {
+                    auto returnValue = lambda_(copy);
+                    static_cast<Fundamental<Type>&>(self) = copy;
+                    return returnValue;
+                }
+                else
+                {
+                    lambda_(copy);
+                    static_cast<Fundamental<Type>&>(self) = copy;
+                    return;
+                }
+            }
+
+            return lambda_(v.get());
+        }
+
+        if constexpr (! std::is_void_v<LambdaReturnType>)
+            return {};
+    }, self.visit_helper());
+}
+
+template <typename T>
+constexpr bool Value::isOpaque()
+{
+    if constexpr (requires(T t) { []<typename U>(Map<U>&){}(t); })
+        return false;
+
+    if constexpr (requires(T t) { []<typename U>(Array<U>&){}(t); })
+        return false;
+
+    if constexpr (std::is_aggregate_v<T>)
+        return detail::num_fields<T>() == 0;
+
+    return true;
+}
+
+template <typename Context, typename... Args>
+template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
+Value::ListenerPair<Context, Args...>::ListenerPair(std::enable_shared_from_this<Context>& context_, Lambda && lambda_)
+    : context(context_.weak_from_this()), lambda(std::move(lambda_))
+{}
+
+template <typename Context, typename... Args>
+void Value::ListenerPair<Context, Args...>::invoke(Args... args)
+{
+    if (lambda)
+    {
+        if (auto ptr = context.lock())
+            lambda(std::move(ptr), args...);
+    }
+}
+
+// Initialize the global invalid value singleton
+inline Invalid& Value::kInvalid = std::invoke([] () -> auto&&
+{
+    static constexpr Invalid invld;
+    return const_cast<Invalid&>(invld);
+});
+
+//=============================================================================
+// Object implementations
+//=============================================================================
+
+template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
+void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+{
+    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(*context, std::move(lambda)));
+}
+
+auto Object::operator()(this auto&& self, std::string_view fldname)
+    -> std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>,
+                          Value const&,
+                          Value&>
+{
+    auto flds = self.type_erased_fields();
+    auto it = std::find_if(flds.begin(), flds.end(), [&fldname] (auto const& fld) { return fld.get().name() == fldname; });
+
+    if (it == flds.end()) // no field with this name?
+        return Value::kInvalid;
+
+    return it->get();
+}
+
+auto Object::getchild(this auto& self, ID subid) -> std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>, Value const&, Value&>
+{
+    using ReturnType = std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>, Value const&, Value&>;
+    using StructType = std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>, Object const, Object>;
+
+    if (subid.empty())
+        return static_cast<ReturnType>(self);
+
+    auto next = subid.front();
+    subid.erase(subid.begin());
+
+    auto& fld = self->operator()(next);
+
+    if (! subid.empty()) // we didn't use all of the ID? Then call us recursively
+    {
+        if (! fld.isStruct()) // this is not a struct, but there are still ID elements. Something is wrong!
+            return Value::kInvalid;
+
+
+        // recurse!
+        return static_cast<StructType&>(fld).getchild(subid);
+    }
+
+    return fld;
+}
+
+inline void Object::callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const
+{
+    childListeners.erase(std::remove_if(childListeners.begin(), childListeners.end(), [] (auto& ptr) { return ptr->expired(); }), childListeners.end());
+
+    for (auto& listener : childListeners)
+        listener->invoke(id, op, parentOfChangedValue, newValue);
+
+    if (parent != nullptr)
+    {
+        auto newID = id;
+        newID.insert(newID.begin(), std::string(this->name()));
+        parent->callChildListeners(newID, op, parentOfChangedValue, newValue);
+    }
+}
+
+//=============================================================================
+// Fundamental implementations
+//=============================================================================
+
+template <typename T>
+Fundamental<T>::Fundamental() : underlying() { }
+
+template <typename T>
+Fundamental<T>::Fundamental(T underlying_) : underlying(underlying_) {}
+
+template <typename T>
+Fundamental<T>::Fundamental(Fundamental const& o) : underlying(o.underlying) {}
+
+template <typename T>
+Fundamental<T>::Fundamental(Fundamental&& o) : underlying(std::move(o.underlying)) {}
+
+template <typename T>
+Fundamental<T>& Fundamental<T>::operator=(T const& newValue)
+{
+    set(newValue);
+    return *this;
+}
+
+template <typename T>
+Fundamental<T>& Fundamental<T>::operator=(Fundamental const& newValue)
+{
+    set(newValue.underlying);
+    return *this;
+}
+
+template <typename T>
+Fundamental<T>& Fundamental<T>::operator=(Fundamental && newValue)
+{
+    set(std::move(newValue.underlying));
+    return *this;
+}
+
+template <typename T>
+void Fundamental<T>::set(T const& newValue)
+{
+    if (newValue == underlying)
+        return;
+
+    if (Value::recursiveListenerDisabler == 0)
+        callListeners(newValue);
+
+    ++Value::recursiveListenerDisabler;
+    auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                      [] (std::false_type)
+                                                      {
+                                                          --Value::recursiveListenerDisabler;
+                                                      });
+    underlying = newValue;
+}
+
+template <typename T>
+void Fundamental<T>::set(T && newValue)
+{
+    if (Value::recursiveListenerDisabler == 0)
+        callListeners(newValue);
+
+    ++Value::recursiveListenerDisabler;
+    auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                      [] (std::false_type)
+                                                      {
+                                                          --Value::recursiveListenerDisabler;
+                                                      });
+    underlying = std::move(newValue);
+}
+
+template <typename T>
+template <std::invocable<T&> Lambda>
+void Fundamental<T>::mutate(Lambda && lambda)
+{
+    T copy(underlying);
+    lambda(copy);
+
+    if (copy != underlying)
+    {
+        if (Value::recursiveListenerDisabler == 0)
+            callListeners(copy);
+
+        ++Value::recursiveListenerDisabler;
+        auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                        [] (std::false_type)
+                                                        {
+                                                            --Value::recursiveListenerDisabler;
+                                                        });
+        underlying = std::move(copy);
+    }
+}
+
+template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+{
+    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(*context, std::move(lambda)));
+}
+
+template <typename T>
+void Fundamental<T>::callListeners(T newValue) const
+{
+    valueListeners.erase(std::remove_if(valueListeners.begin(), valueListeners.end(), [] (auto& ptr) { return ptr->expired(); }), valueListeners.end());
+
+    for (auto& listener : valueListeners)
+        listener->invoke(*this, newValue);
+
+    if (Base::parent != nullptr)
+    {
+        std::conditional_t<kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
+        Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->name())), Object::Operation::modify, *Base::parent, newValueTypeErased);
+    }
+}
+
+template <typename T>
+typename Value::TypesVariant Fundamental<T>::visit_helper()
+{
+    if constexpr (kIsOpaque)
+        return {std::reference_wrapper<T>(underlying)};
+    return Base::visit_helper();
+}
+
+template <typename T>
+typename Value::ConstTypesVariant Fundamental<T>::visit_helper() const
+{
+    if constexpr (kIsOpaque)
+        return {std::reference_wrapper<T const>(underlying)};
+    return Base::visit_helper();
+}
+
+//=============================================================================
+// operator""_fld implementation
+//=============================================================================
+
+template <typename T, T... chars>
+constexpr CompileTimeString<fixstr::fixed_string<sizeof...(chars)>({chars...})> operator""_fld()
+{
+    return { };
+}
+
+//=============================================================================
+// Record implementations
+//=============================================================================
+
+template <typename T>
+auto Record<T>::fields_with(T& u)
+{
+    return detail::filter_tuple<detail::is_field>(boost::pfr::structure_tie(u));
+}
+
+template <typename T>
+auto Record<T>::fields_with(T const& u)
+{
+    return detail::filter_tuple<detail::is_field>(boost::pfr::structure_tie(u));
+}
+
+template <typename T>
+Record<T>::Record() : Fundamental<T>()
+{
+    init();
+}
+
+template <typename T>
+Record<T>::Record(T const& underlying_) : Fundamental<T>(underlying_)
+{
+    init();
+}
+
+template <typename T>
+Record<T>::Record(Record const& o) : Fundamental<T>(o.underlying)
+{
+    init();
+}
+
+template <typename T>
+Record<T>::Record(Record&& o) : Fundamental<T>(std::move(o.underlying))
+{
+    init();
+}
+
+template <typename T>
+Record<T>& Record<T>::operator=(Record const& o)
+{
+    Fundamental<T>::operator=(o);
+    return *this;
+}
+
+template <typename T>
+Record<T>& Record<T>::operator=(Record&& o)
+{
+    Fundamental<T>::operator=(std::move(o));
+    return *this;
+}
+
+template <typename T>
+template <fixstr::fixed_string FieldName>
+auto&& Record<T>::operator()(this auto& self, CompileTimeString<FieldName>)
+{
+    return std::apply([] <typename... Types> (Types &&... fields) -> auto&&
+    {
+        return detail::FindFieldHelper<FieldName>::eval(std::forward<Types>(fields)...);
+    }, self.fields());
+}
+
+template <typename T>
+auto Record<T>::fields(this auto& self)
+{
+    return fields_with(self.underlying);
+}
+
+template <typename T>
+std::vector<std::reference_wrapper<Value const>> Record<T>::type_erased_fields() const
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+std::vector<std::reference_wrapper<Value>> Record<T>::type_erased_fields()
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+template <typename Lambda>
+void Record<T>::visitFields(this auto& self, Lambda && lambda) noexcept
+{
+    std::apply([lambda_ = std::move(lambda)] <typename... Types> (Types &&... fields)
+    {
+        (lambda_(fields.name(), fields), ...);
+    }, self.fields());
+}
+
+template <typename T>
+template <typename Lambda>
+auto Record<T>::visitField(this auto& self, std::string_view const& str, Lambda && lambda)
+{
+    static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
+    using FirstTupleElement = std::tuple_element_t<0, FieldsAsTuple>;
+    using LambdaReturnType = std::invoke_result_t<Lambda, std::conditional_t<kIsConst, FirstTupleElement const&, FirstTupleElement&>>;
+    static constexpr auto kLambdaReturnsVoid = std::is_same_v<LambdaReturnType, void>;
+
+    using ReturnType = std::conditional_t<kLambdaReturnsVoid, bool, std::optional<LambdaReturnType>>;
+
+    ReturnType returnValue = {};
+
+    std::apply([lambda_ = std::move(lambda), &str, &self, &returnValue] <typename... Types> (Types &&... fields)
+    {
+        (std::invoke([&lambda_, &str, &self, &returnValue] (auto& fld)
+        {
+            if ((! returnValue) && fld.name() == str)
+            {
+                if constexpr (kLambdaReturnsVoid)
+                {
+                    returnValue = true;
+                    lambda_(fld);
+                }
+                else
+                {
+                    returnValue = lambda_(fld);
+                }
+            }
+        }, fields), ...);
+    }, self.fields());
+
+    return returnValue;
+}
+
+template <typename T>
+auto Record<T>::type_erased_fields_internal(this auto& self)
+{
+    static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
+    using ElementType = std::conditional_t<kIsConst, Value const, Value>;
+    std::vector<std::reference_wrapper<ElementType>> returnValue;
+
+    std::apply([&returnValue] <typename... Fields> (Fields && ...flds) mutable
+    {
+         (returnValue.emplace_back(static_cast<ElementType&>(flds)), ...);
+    }, self.fields());
+
+    return returnValue;
+}
+
+template <typename T>
+void Record<T>::init()
+{
+    std::apply([this] (auto &&... flds)
+    {
+        (std::invoke([this, &flds] { flds.parent = this; }), ...);
+    }, fields());
+}
+
+//=============================================================================
+// Array implementations
+//=============================================================================
+
+template <typename T>
+std::vector<std::reference_wrapper<Value const>> Array<T>::type_erased_fields() const
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+std::vector<std::reference_wrapper<Value>> Array<T>::type_erased_fields()
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+void Array<T>::addElement(T const& element)
+{
+    callListeners(Operation::add, element, elements.size());
+    elements.emplace_back(*this, element);
+}
+
+template <typename T>
+void Array<T>::addElement(T&& element)
+{
+    callListeners(Operation::add, element, elements.size());
+    elements.emplace_back(*this, std::move(element));
+}
+
+template <typename T>
+void Array<T>::removeElement(std::size_t idx)
+{
+    assert(idx < elements.size());
+    callListeners(Operation::remove, elements[idx], elements.size());
+    elements.erase(elements.begin() + idx);
+}
+
+template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+{
+    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(*context, std::move(lambda)));
+}
+
+template <typename T>
+auto Array<T>::type_erased_fields_internal(this auto && self)
+{
+    static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
+    using ElementType = std::conditional_t<kIsConst, Value const, Value>;
+    using ReturnType = std::vector<std::reference_wrapper<ElementType>>;
+
+    ReturnType returnValue;
+    for (auto& element : self.elements)
+        returnValue.emplace_back(element);
+
+    return returnValue;
+}
+
+template <typename T>
+Array<T>::Element::Element(Array& container_)
+{
+    init(container_);
+}
+
+template <typename T>
+Array<T>::Element::Element(Element const& o) : Base(o)
+{
+    init(static_cast<Array<T>&>(*o.parent));
+}
+
+template <typename T>
+Array<T>::Element::Element(Array& container_, T const& underlying_) : Base(underlying_)
+{
+    init(container_);
+}
+
+template <typename T>
+Array<T>::Element::Element(Array& container_, T && underlying_) : Base(std::move(underlying_))
+{
+    init(container_);
+}
+
+template <typename T>
+typename Array<T>::Element& Array<T>::Element::operator=(T const& t)
+{
+    Base::operator=(t);
+    return *this;
+}
+
+template <typename T>
+typename Array<T>::Element& Array<T>::Element::operator=(T && t)
+{
+    Base::operator=(std::move(t));
+    return *this;
+}
+
+template <typename T>
+std::string Array<T>::Element::name() const
+{
+    auto const idx = this - static_cast<Array*>(Base::parent)->elements.data();
+    return std::to_string(idx);
+}
+
+template <typename T>
+void Array<T>::Element::init(Array& container_)
+{
+    Base::parent = &container_;
+}
+
+template <typename T>
+void Array<T>::callListeners(Operation op, T const& newValue, std::size_t idx) const
+{
+    arrayListeners.erase(std::remove_if(arrayListeners.begin(), arrayListeners.end(), [] (auto& ptr) { return ptr->expired(); }), arrayListeners.end());
+
+    for (auto& listener : arrayListeners)
+        listener->invoke(op, *this, newValue, idx);
+
+    {
+        std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
+        callChildListeners(std::vector<std::string>(1, std::to_string(idx)), op, *this, newValueTypeErased);
+    }
+}
+
+//=============================================================================
+// Map implementations
+//=============================================================================
+
+template <typename T>
+std::vector<std::reference_wrapper<Value const>> Map<T>::type_erased_fields() const
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+std::vector<std::reference_wrapper<Value>> Map<T>::type_erased_fields()
+{
+    return type_erased_fields_internal();
+}
+
+template <typename T>
+void Map<T>::addElement(std::string_view key, T const& element)
+{
+    if (auto it = std::find_if(elements.begin(), elements.end(), [key] (Element const& elem) { return elem.fieldName == key; }); it != elements.end())
+    {
+        *it = element;
+        return;
+    }
+
+    callListeners(Operation::add, element, key);
+    elements.emplace_back(key, *this, element);
+}
+
+template <typename T>
+void Map<T>::addElement(std::string_view key, T&& element)
+{
+    if (auto it = std::find_if(elements.begin(), elements.end(), [key] (Element const& elem) { return elem.fieldName == key; }); it != elements.end())
+    {
+        *it = std::move(element);
+        return;
+    }
+
+    callListeners(Operation::add, element, key);
+    elements.emplace_back(key, *this, std::move(element));
+}
+
+template <typename T>
+bool Map<T>::removeElement(std::string_view key)
+{
+    auto it = std::find_if(elements.begin(), elements.end(), [key] (Element const& elem) { return elem.fieldName == key; });
+
+    if (it == elements.end())
+        return false;
+
+
+    callListeners(Operation::remove, *it, key);
+    elements.erase(it);
+    return true;
+}
+
+template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+{
+    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(*context, std::move(lambda)));
+}
+
+template <typename T>
+auto Map<T>::type_erased_fields_internal(this auto && self)
+{
+    static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
+    using ElementType = std::conditional_t<kIsConst, Value const, Value>;
+    using ReturnType = std::vector<std::reference_wrapper<ElementType>>;
+
+    ReturnType returnValue;
+    for (auto& element : self.elements)
+        returnValue.emplace_back(element);
+
+    return returnValue;
+}
+
+template <typename T>
+Map<T>::Element::Element(std::string_view fieldName_, Map& container_) : fieldName(fieldName_)
+{
+    init(container_);
+}
+
+template <typename T>
+Map<T>::Element::Element(Element const& o) : Base(o),  fieldName(o.fieldName)
+{
+    init(static_cast<Map<T>&>(*o.parent));
+}
+
+template <typename T>
+Map<T>::Element::Element(std::string_view fieldName_, Map& container_, T const& underlying_) : Base(underlying_), fieldName(fieldName_)
+{
+    init(container_);
+}
+
+template <typename T>
+Map<T>::Element::Element(std::string_view fieldName_, Map& container_, T && underlying_) : Base(std::move(underlying_)), fieldName(fieldName_)
+{
+    init(container_);
+}
+
+template <typename T>
+typename Map<T>::Element& Map<T>::Element::operator=(T const& t)
+{
+    Base::operator=(t);
+    return *this;
+}
+
+template <typename T>
+typename Map<T>::Element& Map<T>::Element::operator=(T && t)
+{
+    Base::operator=(std::move(t));
+    return *this;
+}
+
+template <typename T>
+std::string Map<T>::Element::name() const
+{
+    return fieldName;
+}
+
+template <typename T>
+void Map<T>::Element::init(Map& container_)
+{
+    Base::parent = &container_;
+}
+
+template <typename T>
+void Map<T>::callListeners(Operation op, T const& newValue, std::string_view key) const
+{
+    mapListeners.erase(std::remove_if(mapListeners.begin(), mapListeners.end(), [] (auto& ptr) { return ptr->expired(); }), mapListeners.end());
+
+    for (auto& listener : mapListeners)
+        listener->invoke(op, *this, newValue, key);
+
+    {
+        std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
+        callChildListeners(std::vector<std::string>(1, std::string(key)), op, *this, newValueTypeErased);
+    }
+}
+
+//=============================================================================
+// Field implementations
+//=============================================================================
+
+template <typename T, fixstr::fixed_string Name>
+Field<T, Name>& Field<T, Name>::operator=(T const& t)
+{
+    Base::operator=(t);
+    return *this;
+}
+
+template <typename T, fixstr::fixed_string Name>
+Field<T, Name>& Field<T, Name>::operator=(T && t)
+{
+    Base::operator=(std::move(t));
+    return *this;
+}
+
+template <typename T, fixstr::fixed_string Name>
+std::string Field<T, Name>::name() const
+{
+    return std::string(std::string_view(Name));
+}
+
+//=============================================================================
+// Stream operators implementations
+//=============================================================================
+
+inline std::ostream& operator<<(std::ostream& o, Value const& x)
+{
+    x.visit([&o] (auto const& underlying) { o << underlying; });
+    return o;
+}
+
+inline std::ostream& operator<<(std::ostream& o, Object const& x)
+{
+    o << "{ ";
+    auto first = true;
+    auto const& fields = x.type_erased_fields();
+
+    for (auto const& fld : fields)
+    {
+        if (! std::exchange(first, false))
+            o << ", ";
+
+        o << "." << fld.get().name() << " = " << fld.get();
+    }
+
+    o << " }";
+    return o;
+}
+
+inline std::ostream& operator<<(std::ostream& o, Invalid const&)
+{
+    return o;
+}
+
+} // namespace dynamic
+
+//=============================================================================
+// std::formatter implementations
+//=============================================================================
+
+inline auto std::formatter<dynamic::Object>::format(dynamic::Object const& v, format_context& ctx) const
+{
+    std::ostringstream ss;
+    ss << v;
+    return std::formatter<string>::format(ss.str(), ctx);
+}
+
+template<typename CharT>
+template<class FmtContext>
+FmtContext::iterator std::formatter<dynamic::Value, CharT>::format(dynamic::Value const& v, FmtContext& ctx) const
+{
+    return v.visit([&ctx] (auto const& underlying)
+    {
+        return std::formatter<std::remove_cvref_t<decltype(underlying)>, CharT>{}.format(underlying, ctx);
+    });
+}
