@@ -338,8 +338,8 @@ point.visitField(fieldName, [](auto& field) {
 
 ## License
 
-*[Add your license information here]*
+MIT License
 
 ## Contributing
 
-*[Add contribution guidelines here]*
+Feel free to report issues and submit pull requests.
