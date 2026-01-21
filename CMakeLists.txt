@@ -1,12 +1,11 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.10)
 
-project(playground)
+project(dynamic)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS_RELEASE -Ofast)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 find_package(Threads REQUIRED)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -60,4 +59,4 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 endif()
 
-add_executable(playground main.cpp CxxUtilities.hpp)
+add_executable(dynamic main.cpp CxxUtilities.hpp)
