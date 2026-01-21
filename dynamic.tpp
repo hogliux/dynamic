@@ -52,13 +52,13 @@ inline Value::Value(Value&& o) : parent(nullptr)
 inline typename Value::TypesVariant Value::visit_helper()
 {
     assert(false); /* crash! */
-    return *reinterpret_cast<TypesVariant*>(0);
+    return *reinterpret_cast<TypesVariant*>(1);
 }
 
 inline typename Value::ConstTypesVariant Value::visit_helper() const
 {
     assert(false); /* crash! */
-    return *reinterpret_cast<ConstTypesVariant*>(0);
+    return *reinterpret_cast<ConstTypesVariant*>(1);
 }
 
 template <typename Lambda>
@@ -112,7 +112,14 @@ auto Value::visit(this auto&& self, Lambda && lambda) -> decltype(auto)
                 {
                     lambda_(copy);
                     static_cast<Fundamental<Type>&>(self) = copy;
-                    return;
+                    if constexpr (! std::is_void_v<LambdaReturnType>)
+                    {
+                        assert(false);
+                        // this should never reach this code: crash !
+                        return *reinterpret_cast<LambdaReturnType*>(1);
+                    }
+                    else
+                        return;
                 }
             }
 
@@ -120,7 +127,12 @@ auto Value::visit(this auto&& self, Lambda && lambda) -> decltype(auto)
         }
 
         if constexpr (! std::is_void_v<LambdaReturnType>)
-            return {};
+        {
+            assert(false);
+            // this should never reach this code: crash !
+            return *reinterpret_cast<LambdaReturnType*>(1);
+        }
+        
     }, self.visit_helper());
 }
 
@@ -165,6 +177,8 @@ inline Invalid& Value::kInvalid = std::invoke([] () -> auto&&
 //=============================================================================
 // Object implementations
 //=============================================================================
+
+inline Object::Object(Object const& o) : Value(o) {}
 
 template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
@@ -360,12 +374,17 @@ typename Value::ConstTypesVariant Fundamental<T>::visit_helper() const
 //=============================================================================
 // operator""_fld implementation
 //=============================================================================
-
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#ifdef __clang__
+#    pragma GCC diagnostic ignored "-Wgnu-string-literal-operator-template"
+#endif
 template <typename T, T... chars>
 constexpr CompileTimeString<fixstr::fixed_string<sizeof...(chars)>({chars...})> operator""_fld()
 {
     return { };
 }
+#pragma GCC diagnostic pop
 
 //=============================================================================
 // Record implementations
@@ -523,6 +542,14 @@ void Record<T>::init()
 //=============================================================================
 
 template <typename T>
+Array<T>::Array(Array const& o) : Object(o), elements()
+{
+    // Copy elements but not arrayListeners
+    for (auto const& elem : o.elements)
+        elements.emplace_back(*this, elem());
+}
+
+template <typename T>
 std::vector<std::reference_wrapper<Value const>> Array<T>::type_erased_fields() const
 {
     return type_erased_fields_internal();
@@ -645,6 +672,14 @@ void Array<T>::callListeners(Operation op, T const& newValue, std::size_t idx) c
 //=============================================================================
 // Map implementations
 //=============================================================================
+
+template <typename T>
+Map<T>::Map(Map const& o) : Object(o), elements()
+{
+    // Copy elements but not mapListeners
+    for (auto const& elem : o.elements)
+        elements.emplace_back(elem.fieldName, *this, elem());
+}
 
 template <typename T>
 std::vector<std::reference_wrapper<Value const>> Map<T>::type_erased_fields() const

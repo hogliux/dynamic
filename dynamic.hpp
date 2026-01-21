@@ -110,11 +110,6 @@ class Invalid;
 template <typename T> class Array;
 template <typename T> class Map;
 
-// Stream output operators
-std::ostream& operator<<(std::ostream& o, Value const& x);
-std::ostream& operator<<(std::ostream& o, Object const& x);
-std::ostream& operator<<(std::ostream& o, Invalid const& x);
-
 // Forward declaration of Field (needed by detail namespace utilities)
 template <typename T, fixstr::fixed_string Name> class Field;
 
@@ -145,15 +140,13 @@ template <typename T, fixstr::fixed_string Name> class Field;
 class Value
 {
 private:
-    friend class Invalid;
-    friend class Object;
-
     /// Tuple of all primitive types supported by the visitor pattern
     using SupportedFundamentalTypes = std::tuple<
         int8_t, int16_t, int32_t, int64_t,
         float, double,
         std::string
     >;
+
 public:
     /// Global singleton representing an invalid/missing value
     static Invalid& kInvalid;
@@ -200,23 +193,22 @@ public:
     static constexpr bool isOpaque();
 
 protected:
+    friend class Invalid;
+    friend class Object;
+    template <typename T> friend class Fundamental;
+    template <typename T> friend class Record;
+
     using TypesVariant = detail::apply_tuple<std::variant, detail::transform_tuple<SupportedFundamentalTypes, detail::add_reference_wrapper>::type>::type;
     using ConstTypesVariant = detail::apply_tuple<std::variant, detail::transform_tuple<SupportedFundamentalTypes, detail::add_const_reference_wrapper>::type>::type;
 
     virtual TypesVariant visit_helper();
     virtual ConstTypesVariant visit_helper() const;
 
-    friend class Object;
+    
     constexpr Value() = default;
     // don't copy parent
     Value(Value const&);
     Value(Value&& o);
-
-    template <typename T>
-    friend class Fundamental;
-
-    template <typename T>
-    friend class Record;
 
     /**
      * @brief Base class for listener storage with type-erased context
@@ -360,6 +352,7 @@ public:
 
 protected:
     Object() = default;
+    Object(Object const& o);
 
 private:
     template <typename T>
@@ -492,10 +485,10 @@ public:
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
 protected:
-    using ValueListenerPairBase = typename Base::ListenerPairBase<Fundamental<T> const&, T const&>;
+    using ValueListenerPairBase = typename Base::template ListenerPairBase<Fundamental<T> const&, T const&>;
 
     template <typename Context>
-    using ValueListenerPair = typename Base::ListenerPair<Context, Fundamental<T> const&, T const&>;
+    using ValueListenerPair = typename Base::template ListenerPair<Context, Fundamental<T> const&, T const&>;
 
     void callListeners(T newValue) const;
 
@@ -523,8 +516,14 @@ protected:
  *
  * @return CompileTimeString containing the field name
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#ifdef __clang__
+#    pragma GCC diagnostic ignored "-Wgnu-string-literal-operator-template"
+#endif
 template <typename T, T... chars>
 constexpr CompileTimeString<fixstr::fixed_string<sizeof...(chars)>({chars...})> operator""_fld();
+#pragma GCC diagnostic pop
 
 /**
  * @brief Concrete implementation of Fundamental<T> for struct types with extended field access
@@ -688,6 +687,7 @@ class Array : public Object
 {
 public:
     Array() = default;
+    Array(Array const& o);
 
     /// Returns the type_info for Array<T>
     std::type_info const& type() const override { return typeid(Array<T>); }
@@ -832,6 +832,7 @@ class Map : public Object
 {
 public:
     Map() = default;
+    Map(Map const& o);
 
     /// Returns the type_info for Array<T> (note: returns Array<T> due to implementation)
     std::type_info const& type() const override { return typeid(Array<T>); }
@@ -999,14 +1000,10 @@ public:
     std::string name() const override;
 };
 
-} // namespace dynamic
-
 // Stream output operators implementation
-namespace dynamic
-{
-std::ostream& operator<<(std::ostream& o, Value const& x);
-std::ostream& operator<<(std::ostream& o, Object const& x);
-std::ostream& operator<<(std::ostream& o, Invalid const& x);
+std::ostream& operator<<(std::ostream& o, dynamic::Value const& x);
+std::ostream& operator<<(std::ostream& o, dynamic::Object const& x);
+std::ostream& operator<<(std::ostream& o, dynamic::Invalid const& x);
 } // namespace dynamic
 
 // std::formatter specializations
