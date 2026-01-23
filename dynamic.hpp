@@ -192,6 +192,17 @@ public:
     template <typename T>
     static constexpr bool isOpaque();
 
+    /**
+     * @brief Assign another the value of another Value to the recipient
+     * 
+     * @return Returns true on success. Will assert if the underlying
+     * type of other and the recipient do not match.
+     */
+    virtual bool assign(Value const& other) = 0;
+
+    /** Assignment operator - uses above assign method */
+    Value& operator=(Value const&);
+
 protected:
     friend class Invalid;
     friend class Object;
@@ -277,6 +288,7 @@ public:
     std::type_info const& type() const override { return typeid(void); }
     bool isValid() const override { return false; }
     constexpr operator bool() const { return false; }
+    bool assign(Value const&) override { return false; }
 };
 
 /**
@@ -307,7 +319,37 @@ public:
         modify    ///< Value was modified
     };
 
+     /// Copy constructor (does not copy listeners !!)
+    Object(Object const& o);
+
+    /// Move constructor
+    Object(Object&& o);
+
     bool isStruct() const override { return true; }
+
+    /**
+     * @brief Assign a value to a child element of this Object
+     * 
+     * Tries to assign a value to a child element of this Object. If underlying object
+     * is dynamic (i.e. a Map or Array and not a Record) and a child with this name
+     * does not exist, it may be created.
+     * 
+     * @return True if succesful. There may be multiple reasons why this may not succeeed.
+     *         For example, if the underlying Object is a C++ struct and there is no field
+     *         with this name. Or if the underlying object is an array but name is not
+     *         an integer etc.
+     */
+    virtual bool assignChild(std::string const& name, Value const& newValue) = 0;
+
+    /**
+     * @brief Removes a child element from this Object
+     * 
+     * Tries to remove a child element from an Object.
+     * 
+     * @return True if succesful. False if the element does not exist or cannot be removed
+     * (for example Struct).
+     */
+    virtual bool removeChild(std::string const& name) = 0;
 
     /**
      * @brief Register a listener for changes to any child field
@@ -350,9 +392,13 @@ public:
      */
     auto getchild(this auto& self, ID subid) -> std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>, Value const&, Value&>;
 
+    // Copy assignment operator (does not copy listeners)
+    Object& operator=(Object const&);
+
+    Object& operator=(Object&&);
+
 protected:
     Object() = default;
-    Object(Object const& o);
 
 private:
     template <typename T>
@@ -371,7 +417,6 @@ private:
     template <typename Context>
     using ChildListenerPair = ListenerPair<Context, ID const&, Operation, Object const&, Value const&>;
 
-    std::vector<std::pair<std::string, std::reference_wrapper<Value>>> const fields_;
     mutable std::vector<std::unique_ptr<ChildListenerPairBase>> childListeners;
 };
 
@@ -483,6 +528,9 @@ public:
      */
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
+
+    // overridden base methods
+    bool assign(Value const&) override;
 
 protected:
     using ValueListenerPairBase = typename Base::template ListenerPairBase<Fundamental<T> const&, T const&>;
@@ -652,6 +700,10 @@ public:
     template <typename Lambda>
     auto visitField(this auto& self, std::string_view const& str, Lambda && lambda);
 
+    // overridden base methods
+    bool assignChild(std::string const&, Value const&) override;
+    bool removeChild(std::string const&) override;
+
 private:
     auto type_erased_fields_internal(this auto& self);
 
@@ -747,6 +799,19 @@ public:
      */
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
+
+    // overridden base methods
+    bool assign(Value const&) override;
+    bool assignChild(std::string const&, Value const&) override;
+    bool removeChild(std::string const&) override;
+
+    Array& operator=(Array const& o)
+    {
+        auto status = assign(o);
+        assert(status);
+        (void)status;
+        return *this;
+    }
 
 private:
     auto type_erased_fields_internal(this auto && self);
@@ -896,6 +961,19 @@ public:
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
+    // assignment operator
+    Map& operator=(Map const& o)
+    {
+        auto status = assign(o);
+        assert(status);
+        (void)status;
+        return *this;
+    }
+
+    // overridden base methods
+    bool assign(Value const&) override;
+    bool assignChild(std::string const&, Value const&) override;
+    bool removeChild(std::string const&) override;
 private:
     auto type_erased_fields_internal(this auto && self);
 

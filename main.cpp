@@ -9,12 +9,24 @@ struct Point
 {
     Field<float, "x">      x;
     Field<float, "y">      y;
+
+    friend bool operator==(Point const& a, Point const& b) noexcept
+    {
+        return a.x() == b.x() && a.y() == b.y();
+    }
 };
+
+
 
 struct Line
 {
     Field<Point, "start">       start;
     Field<Point, "finish">      finish;
+
+    friend bool operator==(Line const& a, Line const& b) noexcept
+    {
+        return a.start() == b.start() && a.finish() == b.finish();
+    }
 };
 
 struct State
@@ -68,10 +80,11 @@ struct Application : std::enable_shared_from_this<Application>
 
         });
 
-        Line newLine;
+        Record<Line> newLine;
 
         state("paths"_fld).addElement("fabian", newLine);
         state("paths"_fld).addElement("chris", newLine);
+        state("paths"_fld).assignChild("ces", newLine);
 
         state("points"_fld).addElement(new_pt);
         state("points"_fld).addElement(new_pt);
@@ -79,6 +92,8 @@ struct Application : std::enable_shared_from_this<Application>
         {
             f = 3.3f;
         });
+
+        static_cast<Object&>(state("points"_fld)("0")).assignChild("y", Fundamental<float>(7.5f));
 
         for (auto const& key : Record<Point>::kFieldNames)
             std::cout << key << std::endl;

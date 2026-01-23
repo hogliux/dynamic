@@ -151,6 +151,15 @@ constexpr bool Value::isOpaque()
     return true;
 }
 
+Value& Value::operator=(Value const& other)
+{
+    auto success = assign(other);
+    assert(success);
+    (void)success;
+
+    return *this;
+}
+
 template <typename Context, typename... Args>
 template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
 Value::ListenerPair<Context, Args...>::ListenerPair(std::enable_shared_from_this<Context>& context_, Lambda && lambda_)
@@ -178,7 +187,8 @@ inline Invalid& Value::kInvalid = std::invoke([] () -> auto&&
 // Object implementations
 //=============================================================================
 
-inline Object::Object(Object const& o) : Value(o) {}
+inline Object::Object(Object const& o) { operator=(o); }
+inline Object::Object(Object&& o) : Value(std::move(o)), childListeners(std::move(o.childListeners)) {}
 
 template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
@@ -241,6 +251,18 @@ inline void Object::callChildListeners(ID const& id, Operation op, Object const&
     }
 }
 
+Object& Object::operator=(Object const& o)
+{
+    Value::operator=(static_cast<Value const&>(o));
+    return *this;
+}
+
+Object& Object::operator=(Object&& o)
+{
+    Value::operator=(std::move(o));
+    return *this;
+}
+
 //=============================================================================
 // Fundamental implementations
 //=============================================================================
@@ -281,7 +303,7 @@ Fundamental<T>& Fundamental<T>::operator=(Fundamental && newValue)
 template <typename T>
 void Fundamental<T>::set(T const& newValue)
 {
-    if (newValue == underlying)
+    if (underlying == newValue)
         return;
 
     if (Value::recursiveListenerDisabler == 0)
@@ -338,6 +360,16 @@ template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<
 void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
 {
     valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(*context, std::move(lambda)));
+}
+
+template <typename T>
+bool Fundamental<T>::assign(Value const& other)
+{
+    if (type() != other.type())
+        return false;
+    
+    set(static_cast<T>(static_cast<Fundamental<T> const&>(other)));
+    return true;
 }
 
 template <typename T>
@@ -491,9 +523,9 @@ auto Record<T>::visitField(this auto& self, std::string_view const& str, Lambda 
 
     ReturnType returnValue = {};
 
-    std::apply([lambda_ = std::move(lambda), &str, &self, &returnValue] <typename... Types> (Types &&... fields)
+    std::apply([lambda_ = std::move(lambda), &str, &returnValue] <typename... Types> (Types &&... fields)
     {
-        (std::invoke([&lambda_, &str, &self, &returnValue] (auto& fld)
+        (std::invoke([&lambda_, &str, &returnValue] (auto& fld)
         {
             if ((! returnValue) && fld.name() == str)
             {
@@ -535,6 +567,25 @@ void Record<T>::init()
     {
         (std::invoke([this, &flds] { flds.parent = this; }), ...);
     }, fields());
+}
+
+// overridden base methods
+template <typename T>
+bool Record<T>::assignChild(std::string const& name, Value const& newValue)
+{
+    auto result = visitField(name, [&newValue] (auto& fld) { return fld.assign(newValue); });
+
+    if (! result.has_value())
+        return false;
+    
+    return *result;
+}
+
+template <typename T>
+bool Record<T>::removeChild(std::string const&)
+{
+    // you can never remove a field from a struct
+    return false;
 }
 
 //=============================================================================
@@ -667,6 +718,73 @@ void Array<T>::callListeners(Operation op, T const& newValue, std::size_t idx) c
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
         callChildListeners(std::vector<std::string>(1, std::to_string(idx)), op, *this, newValueTypeErased);
     }
+}
+
+// overridden base methods
+template <typename T>
+bool Array<T>::assign(Value const& unsafeOther)
+{
+    if (type() != unsafeOther.type())
+        return false;
+    
+    auto const& other = static_cast<Array const&>(unsafeOther);
+
+    while (elements.size())
+        removeElement(elements.size() - 1);
+
+    for (auto const& otherElement : other.elements)
+        addElement(static_cast<T>(otherElement));
+
+    return true;
+}
+
+template <typename T>
+bool Array<T>::assignChild(std::string const& name, Value const& newValue)
+{
+    if (newValue.type() != typeid(T))
+        return false;
+
+    int index = 0;
+    try
+    {
+        index = std::stoi(name);
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    if (index < 0)
+        return false;
+
+    if (static_cast<std::size_t>(index) < elements.size())
+        return elements[static_cast<std::size_t>(index)].assign(newValue);
+
+    while (elements.size() < static_cast<std::size_t>(index))
+        addElement({});
+
+    addElement(static_cast<T>(static_cast<Fundamental<T> const&>(newValue)));
+    return true;
+}
+
+template <typename T>
+bool Array<T>::removeChild(std::string const& name)
+{
+    int index = 0;
+    try
+    {
+        index = std::stoi(name);
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    if (index < 0 || static_cast<std::size_t>(index) >= elements.size())
+        return false;
+    
+    removeElement(static_cast<std::size_t>(index));
+    return true;
 }
 
 //=============================================================================
@@ -816,6 +934,50 @@ void Map<T>::callListeners(Operation op, T const& newValue, std::string_view key
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
         callChildListeners(std::vector<std::string>(1, std::string(key)), op, *this, newValueTypeErased);
     }
+}
+
+// overridden base methods
+template <typename T>
+bool Map<T>::assign(Value const& unsafeOther)
+{
+    if (type() != unsafeOther.type())
+        return false;
+    
+    auto const& other = static_cast<Map const&>(unsafeOther);
+
+    while (elements.size())
+        removeElement(elements[elements.size() - 1].fieldName);
+
+    for (auto const& otherElement : other.elements)
+        addElement(otherElement.fieldName, static_cast<T>(otherElement));
+
+    return true;
+}
+
+template <typename T>
+bool Map<T>::assignChild(std::string const& name, Value const& newValue)
+{
+    if (newValue.type() != typeid(T))
+        return false;
+
+    auto it = std::find_if(elements.begin(), elements.end(), [name] (Element const& elem) { return elem.fieldName == name; });
+
+    if (it != elements.end())
+        return it->assign(newValue);
+    
+    addElement(name, static_cast<T>(static_cast<Fundamental<T> const&>(newValue)));
+    return true;
+}
+
+template <typename T>
+bool Map<T>::removeChild(std::string const& name)
+{
+    auto it = std::find_if(elements.begin(), elements.end(), [name] (Element const& elem) { return elem.fieldName == name; });
+    if (it == elements.end())
+        return false;
+
+    removeElement(name);
+    return true;
 }
 
 //=============================================================================
