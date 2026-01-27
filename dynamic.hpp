@@ -21,6 +21,10 @@
 
 #pragma once
 
+#ifndef JUCE_SUPPORT
+ #define JUCE_SUPPORT (JUCE_MAC || JUCE_LINUX || JUCE_IOS || JUCE_ANDROID || JUCE_WINDOWS)
+#endif
+
 #include <cstdint>
 #include <string>
 #include <memory>
@@ -259,6 +263,28 @@ protected:
         bool expired() const noexcept override { return context.expired(); }
     };
 
+   #if JUCE_SUPPORT
+    /**
+     * @brief Concrete listener storage with JUCE Component
+     *
+     * Holds a weak_ptr to the context and invokes the lambda with
+     * a locked shared_ptr when the listener fires.
+     */
+    template <typename ComponentType, typename... Args>
+    struct ListenerPairJUCE : ListenerPairBase<Args...>
+    {
+        template <std::invocable<ComponentType&, Args...> Lambda>
+        ListenerPairJUCE(ComponentType* context_, Lambda && lambda_);
+
+        juce::Component::SafePointer<ComponentType> context;
+        std::function<void (ComponentType&, Args...)> lambda;
+
+        void invoke(Args... args) override;
+
+        bool expired() const noexcept override { return context.getComponent() == nullptr; }
+    };
+   #endif
+
     Object* parent = nullptr;
     static thread_local std::size_t recursiveListenerDisabler;
 };
@@ -364,6 +390,11 @@ public:
     template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Operation, Object const&, Value const&> Lambda>
     void addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
 
+   #if JUCE_SUPPORT
+    template <class ComponentType, std::invocable<ComponentType&, ID const&, Operation, Object const&, Value const&> Lambda>
+    void addChildListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
+   #endif
+
     /// Returns a vector of references to all fields (const version)
     virtual std::vector<std::reference_wrapper<Value const>> type_erased_fields() const = 0;
 
@@ -416,6 +447,11 @@ private:
 
     template <typename Context>
     using ChildListenerPair = ListenerPair<Context, ID const&, Operation, Object const&, Value const&>;
+
+   #if JUCE_SUPPORT
+    template <typename ComponentType>
+    using ChildListenerPairJUCE = ListenerPairJUCE<ComponentType, ID const&, Operation, Object const&, Value const&>;
+   #endif
 
     mutable std::vector<std::unique_ptr<ChildListenerPairBase>> childListeners;
 };
@@ -709,7 +745,13 @@ private:
 
     void init();
 };
+} //namespace dynamic
 
+template <typename T> bool operator==(dynamic::Array<T> const&, dynamic::Array<T> const&);
+template <typename T> bool operator==(dynamic::Map<T>   const&, dynamic::Map<T>   const&);
+
+namespace dynamic
+{
 /**
  * @brief Dynamic array container with reflection and change notification support
  *
@@ -813,6 +855,7 @@ public:
         return *this;
     }
 
+    friend bool operator==<>(Array<T> const&, Array<T> const&);
 private:
     auto type_erased_fields_internal(this auto && self);
 
@@ -974,6 +1017,8 @@ public:
     bool assign(Value const&) override;
     bool assignChild(std::string const&, Value const&) override;
     bool removeChild(std::string const&) override;
+
+    friend bool operator==<>(Map<T> const&, Map<T> const&);
 private:
     auto type_erased_fields_internal(this auto && self);
 
@@ -1014,6 +1059,7 @@ private:
         std::string name() const override;
 
     private:
+        friend bool operator==<>(Map<T> const&, Map<T> const&);
         friend class Map<T>;
         std::string fieldName;
 

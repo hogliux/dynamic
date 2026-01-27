@@ -4,63 +4,8 @@ namespace dynamic
 {
 
 //=============================================================================
-// ID implementations
-//=============================================================================
-
-inline ID& ID::operator=(ID const& o)
-{
-    std::vector<std::string>::operator=(o);
-    return *this;
-}
-
-inline ID& ID::operator=(ID && o)
-{
-    std::vector<std::string>::operator=(std::move(o));
-    return *this;
-}
-
-inline std::string ID::toString() const
-{
-    std::ostringstream ss;
-    std::copy(begin(), end(), std::ostream_iterator<std::string>(ss, "/"));
-    return ss.str().substr(0, ss.str().size() - 1);
-}
-
-inline ID ID::fromString(std::string const& path)
-{
-    ID elements;
-    std::istringstream ss(path);
-    for (std::string line; std::getline(ss, line, '/');)
-        elements.emplace_back(std::move(line));
-
-    return elements;
-}
-
-//=============================================================================
 // Value implementations
 //=============================================================================
-
-inline thread_local std::size_t Value::recursiveListenerDisabler = 0;
-
-inline Value::Value(Value const&) : parent(nullptr) {}
-
-inline Value::Value(Value&& o) : parent(nullptr)
-{
-    std::swap(parent, o.parent);
-}
-
-inline typename Value::TypesVariant Value::visit_helper()
-{
-    assert(false); /* crash! */
-    return *reinterpret_cast<TypesVariant*>(1);
-}
-
-inline typename Value::ConstTypesVariant Value::visit_helper() const
-{
-    assert(false); /* crash! */
-    return *reinterpret_cast<ConstTypesVariant*>(1);
-}
-
 template <typename Lambda>
 auto Value::visit(this auto&& self, Lambda && lambda) -> decltype(auto)
 {
@@ -151,15 +96,6 @@ constexpr bool Value::isOpaque()
     return true;
 }
 
-Value& Value::operator=(Value const& other)
-{
-    auto success = assign(other);
-    assert(success);
-    (void)success;
-
-    return *this;
-}
-
 template <typename Context, typename... Args>
 template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
 Value::ListenerPair<Context, Args...>::ListenerPair(std::enable_shared_from_this<Context>& context_, Lambda && lambda_)
@@ -176,25 +112,41 @@ void Value::ListenerPair<Context, Args...>::invoke(Args... args)
     }
 }
 
-// Initialize the global invalid value singleton
-inline Invalid& Value::kInvalid = std::invoke([] () -> auto&&
+#if JUCE_SUPPORT
+template <typename ComponentType, typename... Args>
+template <std::invocable<ComponentType&, Args...> Lambda>
+Value::ListenerPairJUCE<ComponentType, Args...>::ListenerPairJUCE(ComponentType* context_, Lambda && lambda_)
+    : context(context_), lambda(std::move(lambda_))
+{}
+
+template <typename ComponentType, typename... Args>
+void Value::ListenerPairJUCE<ComponentType, Args...>::invoke(Args... args)
 {
-    static constexpr Invalid invld;
-    return const_cast<Invalid&>(invld);
-});
+    if (lambda)
+    {
+        if (auto ptr = context.getComponent())
+            lambda(*ptr, args...);
+    }
+}
+#endif
+
 
 //=============================================================================
 // Object implementations
 //=============================================================================
-
-inline Object::Object(Object const& o) { operator=(o); }
-inline Object::Object(Object&& o) : Value(std::move(o)), childListeners(std::move(o.childListeners)) {}
-
 template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
 {
     childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(*context, std::move(lambda)));
 }
+
+#if JUCE_SUPPORT
+template <class ComponentType, std::invocable<ComponentType&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
+void Object::addChildListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
+{
+    childListeners.emplace_back(std::make_unique<ChildListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+}
+#endif
 
 auto Object::operator()(this auto&& self, std::string_view fldname)
     -> std::conditional_t<std::is_const_v<std::remove_reference_t<decltype(self)>>,
@@ -221,7 +173,7 @@ auto Object::getchild(this auto& self, ID subid) -> std::conditional_t<std::is_c
     auto next = subid.front();
     subid.erase(subid.begin());
 
-    auto& fld = self->operator()(next);
+    auto& fld = self.operator()(next);
 
     if (! subid.empty()) // we didn't use all of the ID? Then call us recursively
     {
@@ -234,33 +186,6 @@ auto Object::getchild(this auto& self, ID subid) -> std::conditional_t<std::is_c
     }
 
     return fld;
-}
-
-inline void Object::callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const
-{
-    childListeners.erase(std::remove_if(childListeners.begin(), childListeners.end(), [] (auto& ptr) { return ptr->expired(); }), childListeners.end());
-
-    for (auto& listener : childListeners)
-        listener->invoke(id, op, parentOfChangedValue, newValue);
-
-    if (parent != nullptr)
-    {
-        auto newID = id;
-        newID.insert(newID.begin(), std::string(this->name()));
-        parent->callChildListeners(newID, op, parentOfChangedValue, newValue);
-    }
-}
-
-Object& Object::operator=(Object const& o)
-{
-    Value::operator=(static_cast<Value const&>(o));
-    return *this;
-}
-
-Object& Object::operator=(Object&& o)
-{
-    Value::operator=(std::move(o));
-    return *this;
 }
 
 //=============================================================================
@@ -631,7 +556,7 @@ void Array<T>::removeElement(std::size_t idx)
 {
     assert(idx < elements.size());
     callListeners(Operation::remove, elements[idx], elements.size());
-    elements.erase(elements.begin() + idx);
+    elements.erase(elements.begin() + static_cast<int>(idx));
 }
 
 template <typename T>
@@ -786,6 +711,30 @@ bool Array<T>::removeChild(std::string const& name)
     removeElement(static_cast<std::size_t>(index));
     return true;
 }
+} //namespace dynamic
+
+template <typename T>
+bool operator==(dynamic::Array<T> const& aarray, dynamic::Array<T> const& barray)
+{
+    auto const n = aarray.elements.size();
+
+    if (n != barray.elements.size())
+        return false;
+
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        auto const& a = aarray.elements[i];
+        auto const& b = barray.elements[i];
+
+        if (a != b)
+            return false;
+    }
+
+    return true;
+}
+
+namespace dynamic
+{
 
 //=============================================================================
 // Map implementations
@@ -979,6 +928,33 @@ bool Map<T>::removeChild(std::string const& name)
     removeElement(name);
     return true;
 }
+} //namespace dynamic
+
+template <typename T>
+bool operator==(dynamic::Map<T> const& amap, dynamic::Map<T> const& bmap)
+{
+    auto const n = amap.elements.size();
+
+    if (n != bmap.elements.size())
+        return false;
+
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        auto const& a = amap.elements[i];
+        auto const& b = bmap.elements[i];
+
+        if (a.fieldName != b.fieldName)
+            return false;
+
+        if (a != b)
+            return false;
+    }
+
+    return true;
+}
+
+namespace dynamic
+{
 
 //=============================================================================
 // Field implementations

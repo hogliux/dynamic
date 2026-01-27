@@ -59,4 +59,4 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 endif()
 
-add_executable(dynamic main.cpp CxxUtilities.hpp)
+add_executable(dynamic main.cpp dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
