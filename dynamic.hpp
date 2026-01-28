@@ -365,7 +365,7 @@ public:
      *         with this name. Or if the underlying object is an array but name is not
      *         an integer etc.
      */
-    virtual bool assignChild(std::string const& name, Value const& newValue) = 0;
+    virtual bool assignChild(std::string const& /*name*/, Value const& /*newValue*/) { assert(false); return false; }
 
     /**
      * @brief Removes a child element from this Object
@@ -375,7 +375,7 @@ public:
      * @return True if succesful. False if the element does not exist or cannot be removed
      * (for example Struct).
      */
-    virtual bool removeChild(std::string const& name) = 0;
+    virtual bool removeChild(std::string const& /*name*/) { assert(false); return false; }
 
     /**
      * @brief Register a listener for changes to any child field
@@ -399,10 +399,10 @@ public:
    #endif
 
     /// Returns a vector of references to all fields (const version)
-    virtual std::vector<std::reference_wrapper<Value const>> type_erased_fields() const = 0;
+    virtual std::vector<std::reference_wrapper<Value const>> type_erased_fields() const { assert(false); return {}; }
 
     /// Returns a vector of references to all fields (mutable version)
-    virtual std::vector<std::reference_wrapper<Value>> type_erased_fields() = 0;
+    virtual std::vector<std::reference_wrapper<Value>> type_erased_fields() { assert(false); return {}; }
 
     /**
      * @brief Access a field by name at runtime
@@ -430,6 +430,13 @@ public:
     Object& operator=(Object const&);
 
     Object& operator=(Object&&);
+
+    // Workaround a compiler bug on macOS: the abstract Object is only created with a std::declval
+    // in a required cause. This should not require us to implement virtual base methods, but
+    // apparently macOS clang requires this for some reason
+    std::type_info const& type() const override { assert(false); return typeid(void); }
+    bool isValid() const { assert(false); return false; }
+    bool assign(Value const&) override { assert(false); return false; }
 
 protected:
     Object() = default;
