@@ -253,7 +253,7 @@ protected:
     struct ListenerPair : ListenerPairBase<Args...>
     {
         template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
-        ListenerPair(std::enable_shared_from_this<Context>& context_, Lambda && lambda_);
+        ListenerPair(std::weak_ptr<Context>&& context_, Lambda && lambda_);
 
         std::weak_ptr<Context> context;
         std::function<void (std::shared_ptr<Context>&&, Args...)> lambda;
@@ -389,6 +389,9 @@ public:
      */
     template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Operation, Object const&, Value const&> Lambda>
     void addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
+
+    template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Operation, Object const&, Value const&> Lambda>
+    void addChildListener(std::weak_ptr<Context>&& context, Lambda && lambda);
 
    #if JUCE_SUPPORT
     template <class ComponentType, std::invocable<ComponentType&, ID const&, Operation, Object const&, Value const&> Lambda>

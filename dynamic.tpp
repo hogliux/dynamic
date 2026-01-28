@@ -98,8 +98,8 @@ constexpr bool Value::isOpaque()
 
 template <typename Context, typename... Args>
 template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
-Value::ListenerPair<Context, Args...>::ListenerPair(std::enable_shared_from_this<Context>& context_, Lambda && lambda_)
-    : context(context_.weak_from_this()), lambda(std::move(lambda_))
+Value::ListenerPair<Context, Args...>::ListenerPair(std::weak_ptr<Context>&& context_, Lambda && lambda_)
+    : context(std::move(context_)), lambda(std::move(lambda_))
 {}
 
 template <typename Context, typename... Args>
@@ -137,7 +137,13 @@ void Value::ListenerPairJUCE<ComponentType, Args...>::invoke(Args... args)
 template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
 {
-    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(*context, std::move(lambda)));
+    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
+}
+
+template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
+void Object::addChildListener(std::weak_ptr<Context>&& context, Lambda && lambda)
+{
+    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(std::move(context), std::move(lambda)));
 }
 
 #if JUCE_SUPPORT
