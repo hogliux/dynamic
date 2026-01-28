@@ -78,7 +78,7 @@ Invalid& Value::kInvalid = std::invoke([] () -> auto&&
 //=============================================================================
 // Object implementations
 //=============================================================================
-Object::Object(Object const& o) { operator=(o); }
+Object::Object(Object const& o) : Value(o) {}
 Object::Object(Object&& o) : Value(std::move(o)), childListeners(std::move(o.childListeners)) {}
 
 void Object::callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const
