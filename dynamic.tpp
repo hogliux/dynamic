@@ -307,7 +307,8 @@ bool Fundamental<T>::assign(Value const& other)
     if (type() != other.type())
         return false;
     
-    set(static_cast<T>(static_cast<Fundamental<T> const&>(other)));
+    auto newValue = static_cast<T>(static_cast<Fundamental<T> const&>(other));
+    set(newValue);
     return true;
 }
 

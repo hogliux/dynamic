@@ -352,6 +352,13 @@ public:
     Object(Object&& o);
 
     bool isStruct() const override { return true; }
+    virtual bool isMapOrArray() const { return false; }
+
+    // If this is a map or an array, then this method returns the element type.
+    // If this is a record/struct then there is no single element type. Every field
+    // could have a different type and so this method returns an invlaid type_info
+    // (i.e. the type_info for void).
+    virtual std::type_info const& elementType() const { return typeid(void); }
 
     /**
      * @brief Assign a value to a child element of this Object
@@ -802,6 +809,9 @@ public:
     /// Always returns true - arrays are always valid containers
     constexpr operator bool() const { return true; }
 
+    bool isMapOrArray() const override { return true; }
+    std::type_info const& elementType() const override { return typeid(T); }
+
     /// Returns a vector of type-erased references to all elements (const version)
     std::vector<std::reference_wrapper<Value const>> type_erased_fields() const override;
 
@@ -963,6 +973,9 @@ public:
 
     /// Always returns true - maps are always valid containers
     constexpr operator bool() const { return true; }
+
+    bool isMapOrArray() const override { return true; }
+    std::type_info const& elementType() const override { return typeid(T); }
 
     /// Returns a vector of type-erased references to all values (const version)
     std::vector<std::reference_wrapper<Value const>> type_erased_fields() const override;
