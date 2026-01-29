@@ -491,9 +491,6 @@ private:
  */
 template <typename T>
 class Fundamental : public std::conditional_t<Value::isOpaque<T>(), Value, Object>
-#if JUCE_SUPPORT
-                    , juce::Value::ValueSource
-#endif
 {
 public:
     /// True if T is a struct containing Field<> members
@@ -527,6 +524,9 @@ public:
 
     /// Move constructor
     Fundamental(Fundamental&& o);
+
+    // Destructor
+    ~Fundamental();
 
     /// Returns the type_info for the underlying type T
     std::type_info const& type() const override { return typeid(T); }
@@ -607,8 +607,17 @@ protected:
     mutable std::vector<std::unique_ptr<ValueListenerPairBase>> valueListeners;
 private:
    #if JUCE_SUPPORT
-    juce::var getValue () const override;
-    void setValue(juce::var const&) override;
+    struct DynamicValueSource : juce::Value::ValueSource
+    {
+        DynamicValueSource(Fundamental<T>&);
+        juce::var getValue () const override;
+        void setValue(juce::var const&) override;
+
+        Fundamental<T>* parent = nullptr;
+    };
+
+    // Just have an empty member here if this type does not support juce's Value type
+    std::conditional_t<kIsOpaque, juce::ReferenceCountedObjectPtr<DynamicValueSource>, std::type_identity<void>> juceValue;
    #endif
 };
 

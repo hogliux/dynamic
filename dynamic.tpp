@@ -211,6 +211,18 @@ template <typename T>
 Fundamental<T>::Fundamental(Fundamental&& o) : Value(std::move(o)), underlying(std::move(o.underlying)) {}
 
 template <typename T>
+Fundamental<T>::~Fundamental()
+{
+#if JUCE_SUPPORT
+    if constexpr (kIsOpaque)
+    {
+        if (juceValue != nullptr)
+            juceValue->parent = nullptr;
+    }
+#endif
+}
+
+template <typename T>
 Fundamental<T>& Fundamental<T>::operator=(T const& newValue)
 {
     set(newValue);
@@ -316,32 +328,40 @@ bool Fundamental<T>::assign(Value const& other)
 template <typename T>
 juce::Value Fundamental<T>::getUnderlyingValue() requires Fundamental<T>::kIsOpaque
 {
-    return juce::Value(this);
+    if (juceValue == nullptr)
+        juceValue = new DynamicValueSource(*this);
+
+    return juce::Value(juceValue);
 }
 
 template <typename T>
-juce::var Fundamental<T>::getValue() const
+Fundamental<T>::DynamicValueSource::DynamicValueSource(Fundamental<T>& p)
+    : parent(&p)
+{}
+
+template <typename T>
+juce::var Fundamental<T>::DynamicValueSource::getValue() const
 {
     if constexpr (kIsOpaque)
     {
-        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) return juce::var(static_cast<int>(underlying));
-        if constexpr (std::is_same_v<T, std::int64_t>) return juce::var(static_cast<juce::int64>(underlying));
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) return juce::var(static_cast<double>(underlying));
-        if constexpr (std::is_same_v<T, std::string>) return juce::var(juce::String(underlying));
+        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) return juce::var(static_cast<int>(parent->underlying));
+        if constexpr (std::is_same_v<T, std::int64_t>) return juce::var(static_cast<juce::int64>(parent->underlying));
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) return juce::var(static_cast<double>(parent->underlying));
+        if constexpr (std::is_same_v<T, std::string>) return juce::var(juce::String(parent->underlying));
     }
 
     return {};
 }
 
 template <typename T>
-void Fundamental<T>::setValue(juce::var const& newVar)
+void Fundamental<T>::DynamicValueSource::setValue(juce::var const& newVar)
 {
     if constexpr (kIsOpaque)
     {
-        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) set(static_cast<T>(static_cast<int>(newVar)));
-        else if constexpr (std::is_same_v<T, std::int64_t>) set(static_cast<std::int64_t>(static_cast<juce::int64>(newVar)));
-        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) set(static_cast<T>(static_cast<double>(newVar)));
-        else if constexpr (std::is_same_v<T, std::string>) set(static_cast<juce::String>(newVar).toStdString());
+        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) parent->set(static_cast<T>(static_cast<int>(newVar)));
+        else if constexpr (std::is_same_v<T, std::int64_t>) parent->set(static_cast<std::int64_t>(static_cast<juce::int64>(newVar)));
+        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) parent->set(static_cast<T>(static_cast<double>(newVar)));
+        else if constexpr (std::is_same_v<T, std::string>) parent->set(static_cast<juce::String>(newVar).toStdString());
     }
 }
 #endif
@@ -362,7 +382,10 @@ void Fundamental<T>::callListeners(T newValue)
 
 #if JUCE_SUPPORT
     if constexpr (kIsOpaque)
-        sendChangeMessage(false);
+    {
+        if (juceValue != nullptr)
+            juceValue->sendChangeMessage(false);
+    }
 #endif
 }
 
