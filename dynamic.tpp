@@ -205,10 +205,10 @@ template <typename T>
 Fundamental<T>::Fundamental(T underlying_) : underlying(underlying_) {}
 
 template <typename T>
-Fundamental<T>::Fundamental(Fundamental const& o) : underlying(o.underlying) {}
+Fundamental<T>::Fundamental(Fundamental const& o) : Value(o), underlying(o.underlying) {}
 
 template <typename T>
-Fundamental<T>::Fundamental(Fundamental&& o) : underlying(std::move(o.underlying)) {}
+Fundamental<T>::Fundamental(Fundamental&& o) : Value(std::move(o)), underlying(std::move(o.underlying)) {}
 
 template <typename T>
 Fundamental<T>& Fundamental<T>::operator=(T const& newValue)
@@ -234,8 +234,16 @@ Fundamental<T>& Fundamental<T>::operator=(Fundamental && newValue)
 template <typename T>
 void Fundamental<T>::set(T const& newValue)
 {
-    if (underlying == newValue)
-        return;
+    if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+    {
+        if (std::fabs(underlying - newValue) <= std::numeric_limits<T>::epsilon())
+            return;
+    }
+    else
+    {
+        if (underlying == newValue)
+            return;
+    }
 
     if (Value::recursiveListenerDisabler == 0)
         callListeners(newValue);
@@ -569,7 +577,7 @@ template <typename T>
 template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
 void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
 {
-    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(*context, std::move(lambda)));
+    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
 }
 
 template <typename T>
@@ -608,6 +616,13 @@ template <typename T>
 Array<T>::Element::Element(Array& container_, T && underlying_) : Base(std::move(underlying_))
 {
     init(container_);
+}
+
+template <typename T>
+typename Array<T>::Element& Array<T>::Element::operator=(Element const& o)
+{
+    Base::operator=(o);
+    return *this;
 }
 
 template <typename T>
@@ -849,6 +864,13 @@ template <typename T>
 Map<T>::Element::Element(std::string_view fieldName_, Map& container_, T && underlying_) : Base(std::move(underlying_)), fieldName(fieldName_)
 {
     init(container_);
+}
+
+template <typename T>
+typename Map<T>::Element& Map<T>::Element::operator=(Element const& o)
+{
+    Base::operator=(o);
+    return *this;
 }
 
 template <typename T>

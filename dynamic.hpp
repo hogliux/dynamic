@@ -435,7 +435,7 @@ public:
     // in a required cause. This should not require us to implement virtual base methods, but
     // apparently macOS clang requires this for some reason
     std::type_info const& type() const override { assert(false); return typeid(void); }
-    bool isValid() const { assert(false); return false; }
+    bool isValid() const override { assert(false); return false; }
     bool assign(Value const&) override { assert(false); return false; }
 
 protected:
@@ -896,6 +896,9 @@ private:
         /// Construct element from underlying value (move)
         Element(Array& container_, T && underlying_);
 
+        /// Assignment operator
+        Element& operator=(Element const&);
+
         /// Assign new value to element
         Element& operator=(T const& t);
 
@@ -1058,6 +1061,9 @@ private:
 
         /// Construct element with key and underlying value (move)
         Element(std::string_view fieldName_, Map& container_, T && underlying_);
+
+        // Assignment operator
+        Element& operator=(Element const&);
 
         /// Assign new value to element
         Element& operator=(T const& t);
