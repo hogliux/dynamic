@@ -312,8 +312,42 @@ bool Fundamental<T>::assign(Value const& other)
     return true;
 }
 
+#if JUCE_SUPPORT
 template <typename T>
-void Fundamental<T>::callListeners(T newValue) const
+juce::Value Fundamental<T>::getUnderlyingValue() requires Fundamental<T>::kIsOpaque
+{
+    return juce::Value(this);
+}
+
+template <typename T>
+juce::var Fundamental<T>::getValue() const
+{
+    if constexpr (kIsOpaque)
+    {
+        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) return juce::var(static_cast<int>(underlying));
+        if constexpr (std::is_same_v<T, std::int64_t>) return juce::var(static_cast<juce::int64>(underlying));
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) return juce::var(static_cast<double>(underlying));
+        if constexpr (std::is_same_v<T, std::string>) return juce::var(juce::String(underlying));
+    }
+
+    return {};
+}
+
+template <typename T>
+void Fundamental<T>::setValue(juce::var const& newVar)
+{
+    if constexpr (kIsOpaque)
+    {
+        if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) set(static_cast<T>(static_cast<int>(newVar)));
+        else if constexpr (std::is_same_v<T, std::int64_t>) set(static_cast<std::int64_t>(static_cast<juce::int64>(newVar)));
+        else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) set(static_cast<T>(static_cast<double>(newVar)));
+        else if constexpr (std::is_same_v<T, std::string>) set(static_cast<juce::String>(newVar).toStdString());
+    }
+}
+#endif
+
+template <typename T>
+void Fundamental<T>::callListeners(T newValue)
 {
     valueListeners.erase(std::remove_if(valueListeners.begin(), valueListeners.end(), [] (auto& ptr) { return ptr->expired(); }), valueListeners.end());
 
@@ -325,6 +359,11 @@ void Fundamental<T>::callListeners(T newValue) const
         std::conditional_t<kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
         Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->name())), Object::Operation::modify, *Base::parent, newValueTypeErased);
     }
+
+#if JUCE_SUPPORT
+    if constexpr (kIsOpaque)
+        sendChangeMessage(false);
+#endif
 }
 
 template <typename T>

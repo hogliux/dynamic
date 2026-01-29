@@ -491,6 +491,9 @@ private:
  */
 template <typename T>
 class Fundamental : public std::conditional_t<Value::isOpaque<T>(), Value, Object>
+#if JUCE_SUPPORT
+                    , juce::Value::ValueSource
+#endif
 {
 public:
     /// True if T is a struct containing Field<> members
@@ -585,19 +588,28 @@ public:
     // overridden base methods
     bool assign(Value const&) override;
 
+   #if JUCE_SUPPORT
+    juce::Value getUnderlyingValue() requires kIsOpaque;
+   #endif
+
 protected:
     using ValueListenerPairBase = typename Base::template ListenerPairBase<Fundamental<T> const&, T const&>;
 
     template <typename Context>
     using ValueListenerPair = typename Base::template ListenerPair<Context, Fundamental<T> const&, T const&>;
 
-    void callListeners(T newValue) const;
+    void callListeners(T newValue);
 
     typename Value::TypesVariant visit_helper() override;
     typename Value::ConstTypesVariant visit_helper() const override;
 
     T underlying;
     mutable std::vector<std::unique_ptr<ValueListenerPairBase>> valueListeners;
+private:
+   #if JUCE_SUPPORT
+    juce::var getValue () const override;
+    void setValue(juce::var const&) override;
+   #endif
 };
 
 /**
