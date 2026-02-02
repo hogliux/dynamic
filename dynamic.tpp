@@ -638,10 +638,26 @@ void Array<T>::removeElement(std::size_t idx)
 
 template <typename T>
 template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
-void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
 {
     arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
 }
+
+template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+void Array<T>::addListener(std::weak_ptr<Context> && context, Lambda && lambda)
+{
+    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(std::move(context), std::move(lambda)));
+}
+
+#if JUCE_SUPPORT
+template <typename T>
+template <class ComponentType, std::invocable<ComponentType&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+void Array<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
+{
+    arrayListeners.emplace_back(std::make_unique<ArrayListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+}
+#endif
 
 template <typename T>
 auto Array<T>::type_erased_fields_internal(this auto && self)
@@ -878,7 +894,6 @@ bool Map<T>::removeElement(std::string_view key)
     if (it == elements.end())
         return false;
 
-
     callListeners(Operation::remove, *it, key);
     elements.erase(it);
     return true;
@@ -886,10 +901,26 @@ bool Map<T>::removeElement(std::string_view key)
 
 template <typename T>
 template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
-void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
 {
     mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(*context, std::move(lambda)));
 }
+
+template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+void Map<T>::addListener(std::weak_ptr<Context> && context, Lambda && lambda)
+{
+    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(std::move(context), std::move(lambda)));
+}
+
+#if JUCE_SUPPORT
+template <typename T>
+template <class ComponentType, std::invocable<ComponentType&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+void Map<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
+{
+    mapListeners.emplace_back(std::make_unique<MapListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+}
+#endif
 
 template <typename T>
 auto Map<T>::type_erased_fields_internal(this auto && self)
@@ -933,6 +964,7 @@ template <typename T>
 typename Map<T>::Element& Map<T>::Element::operator=(Element const& o)
 {
     Base::operator=(o);
+    fieldName = o.fieldName;
     return *this;
 }
 

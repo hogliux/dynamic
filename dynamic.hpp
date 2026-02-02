@@ -585,6 +585,14 @@ public:
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
+    template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+    void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
+
+   #if JUCE_SUPPORT
+    template <class ComponentType, std::invocable<ComponentType&, Fundamental<T> const&, T const&> Lambda>
+    void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
+   #endif
+
     // overridden base methods
     bool assign(Value const&) override;
 
@@ -881,7 +889,15 @@ public:
      * @param lambda Callback: (shared_ptr<Context>&&, Fundamental<T> const&, T const& newValue)
      */
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
-    void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
+    void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
+
+    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
+
+   #if JUCE_SUPPORT
+    template <class ComponentType, std::invocable<ComponentType&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
+   #endif
 
     // overridden base methods
     bool assign(Value const&) override;
@@ -948,6 +964,11 @@ private:
 
     template <typename Context>
     using ArrayListenerPair = typename Object::ListenerPair<Context, Operation, Array<T> const&, T const&, std::size_t>;
+
+   #if JUCE_SUPPORT
+    template <typename ComponentType>
+    using ArrayListenerPairJUCE = Object::ListenerPairJUCE<ComponentType, Operation, Array<T> const&, T const&, std::size_t>;
+   #endif
 
     void callListeners(Operation op, T const& newValue, std::size_t idx) const;
 
@@ -1049,7 +1070,15 @@ public:
      * @param lambda Callback: (shared_ptr<Context>&&, Fundamental<T> const&, T const& newValue)
      */
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
-    void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
+    void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
+
+    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
+
+   #if JUCE_SUPPORT
+    template <class ComponentType, std::invocable<ComponentType&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
+   #endif
 
     // assignment operator
     Map& operator=(Map const& o)
@@ -1121,6 +1150,11 @@ private:
 
     template <typename Context>
     using MapListenerPair = typename Object::ListenerPair<Context, Operation, Map<T> const&, T const&, std::string_view>;
+
+   #if JUCE_SUPPORT
+    template <typename ComponentType>
+    using MapListenerPairJUCE = Object::ListenerPairJUCE<ComponentType, Operation, Map<T> const&, T const&, std::string_view>;
+   #endif
 
     void callListeners(Operation op, T const& newValue, std::string_view key) const;
 
