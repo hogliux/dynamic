@@ -310,7 +310,7 @@ template <typename T>
 template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
 void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
 {
-    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(*context, std::move(lambda)));
+    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
 }
 
 template <typename T>
