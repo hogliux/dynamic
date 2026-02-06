@@ -148,6 +148,7 @@ private:
     using SupportedFundamentalTypes = std::tuple<
         int8_t, int16_t, int32_t, int64_t,
         float, double,
+        bool,
         std::string, ID
     >;
 
@@ -534,8 +535,8 @@ public:
     /// Always returns true - Fundamental values are always valid
     bool isValid() const override { return true; }
 
-    /// Always returns true - Fundamental values are always valid
-    constexpr operator bool() const { return true; }
+    /// Always returns true - Fundamental values are always valid (disabled for bool to avoid conflict with operator T())
+    constexpr operator bool() const requires (!std::is_same_v<T, bool>) { return true; }
 
     /// Assign new value and notify listeners
     Fundamental& operator=(T const& newValue);

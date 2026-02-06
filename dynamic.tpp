@@ -347,7 +347,9 @@ juce::var Fundamental<T>::DynamicValueSource::getValue() const
         if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) return juce::var(static_cast<int>(parent->underlying));
         if constexpr (std::is_same_v<T, std::int64_t>) return juce::var(static_cast<juce::int64>(parent->underlying));
         if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) return juce::var(static_cast<double>(parent->underlying));
+        if constexpr (std::is_same_v<T, bool>) return juce::var(parent->underlying);
         if constexpr (std::is_same_v<T, std::string>) return juce::var(juce::String(parent->underlying));
+        if constexpr (std::is_same_v<T, ID>) return juce::var(juce::String(parent->underlying.toString()));
     }
 
     return {};
@@ -361,7 +363,9 @@ void Fundamental<T>::DynamicValueSource::setValue(juce::var const& newVar)
         if constexpr (std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t> || std::is_same_v<T, std::int32_t>) parent->set(static_cast<T>(static_cast<int>(newVar)));
         else if constexpr (std::is_same_v<T, std::int64_t>) parent->set(static_cast<std::int64_t>(static_cast<juce::int64>(newVar)));
         else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) parent->set(static_cast<T>(static_cast<double>(newVar)));
+        else if constexpr (std::is_same_v<T, bool>) parent->set(static_cast<bool>(newVar));
         else if constexpr (std::is_same_v<T, std::string>) parent->set(static_cast<juce::String>(newVar).toStdString());
+        else if constexpr (std::is_same_v<T, ID>) parent->set(ID::fromString(static_cast<juce::String>(newVar).toStdString()));
     }
 }
 #endif
