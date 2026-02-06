@@ -148,7 +148,7 @@ private:
     using SupportedFundamentalTypes = std::tuple<
         int8_t, int16_t, int32_t, int64_t,
         float, double,
-        std::string
+        std::string, ID
     >;
 
 public:
@@ -1208,7 +1208,9 @@ public:
     std::string name() const override;
 };
 
-// Stream output operators implementation
+// Equality and stream output operators
+bool operator==(ID const& lhs, ID const& rhs);
+std::ostream& operator<<(std::ostream& o, ID const& id);
 std::ostream& operator<<(std::ostream& o, dynamic::Value const& x);
 std::ostream& operator<<(std::ostream& o, dynamic::Object const& x);
 std::ostream& operator<<(std::ostream& o, dynamic::Invalid const& x);
@@ -1249,6 +1251,15 @@ struct std::formatter<dynamic::Fundamental<T>, CharT> : std::formatter<dynamic::
 
 template <typename T, fixstr::fixed_string Name>
 struct std::formatter<dynamic::Field<T, Name>> : std::formatter<dynamic::Value> {};
+
+template <>
+struct std::formatter<dynamic::ID> : std::formatter<std::string>
+{
+    auto format(dynamic::ID const& id, format_context& ctx) const
+    {
+        return std::formatter<std::string>::format(id.toString(), ctx);
+    }
+};
 
 // Include template implementations
 #include "dynamic.tpp"

@@ -33,7 +33,18 @@ ID ID::fromString(std::string const& path)
         elements.emplace_back(std::move(line));
 
     return elements;
-}    
+}
+
+bool operator==(ID const& lhs, ID const& rhs)
+{
+    return static_cast<std::vector<std::string> const&>(lhs) ==
+           static_cast<std::vector<std::string> const&>(rhs);
+}
+
+std::ostream& operator<<(std::ostream& o, ID const& id)
+{
+    return o << id.toString();
+}
 
 //=============================================================================
 // Value implementations
