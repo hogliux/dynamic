@@ -35,6 +35,11 @@ struct State
     Field<Array<Point>, "points"> points;
 
     Field<Map<Line>, "paths"> paths;
+
+    friend bool operator==(State const& a, State const& b) noexcept
+    {
+        return a.line() == b.line() && a.points == b.points && a.paths == b.paths;
+    }
 };
 
 struct Application : std::enable_shared_from_this<Application>
@@ -50,7 +55,7 @@ struct Application : std::enable_shared_from_this<Application>
 
         Record<State> state;
 
-        state().points.addListener(this, [] (std::shared_ptr<Application> &&, Object::Operation, Array<Point> const& array, Point const& newValue, std::size_t idx)
+        state("points"_fld).addListener(this, [] (std::shared_ptr<Application> &&, Object::Operation, Array<Point> const& array, Point const& newValue, std::size_t idx)
         {
             std::cout << "Fundamental { .x = " << newValue.x << ", .y = " << newValue.y << " } will be added to array " << array << " at index " << idx << std::endl;
         });

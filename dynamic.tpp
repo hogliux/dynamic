@@ -907,7 +907,7 @@ template <typename T>
 template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
 void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
 {
-    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(*context, std::move(lambda)));
+    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
 }
 
 template <typename T>
