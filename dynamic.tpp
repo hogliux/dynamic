@@ -179,7 +179,7 @@ auto Object::getchild(this auto& self, ID subid) -> std::conditional_t<std::is_c
     auto next = subid.front();
     subid.erase(subid.begin());
 
-    auto& fld = self.operator()(next);
+    auto& fld = static_cast<StructType&>(self).operator()(next);
 
     if (! subid.empty()) // we didn't use all of the ID? Then call us recursively
     {
