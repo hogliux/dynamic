@@ -527,7 +527,7 @@ public:
     Fundamental(Fundamental&& o);
 
     // Destructor
-    ~Fundamental();
+    ~Fundamental() override;
 
     /// Returns the type_info for the underlying type T
     std::type_info const& type() const override { return typeid(T); }
