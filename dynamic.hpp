@@ -587,7 +587,7 @@ public:
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
     template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
-    void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
+    void addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const;
 
    #if JUCE_SUPPORT
     template <class ComponentType, std::invocable<ComponentType&, Fundamental<T> const&, T const&> Lambda>
@@ -607,13 +607,18 @@ protected:
     template <typename Context>
     using ValueListenerPair = typename Base::template ListenerPair<Context, Fundamental<T> const&, T const&>;
 
+   #if JUCE_SUPPORT
+     template <typename ComponentType>
+    using ValueListenerPairJUCE = typename Base::template ListenerPairJUCE<ComponentType, Fundamental<T> const&, T const&>;
+   #endif
+
     void callListeners(T newValue);
 
     typename Value::TypesVariant visit_helper() override;
     typename Value::ConstTypesVariant visit_helper() const override;
 
     T underlying;
-    mutable std::vector<std::unique_ptr<ValueListenerPairBase>> valueListeners;
+    mutable std::vector<std::unique_ptr<ValueListenerPairBase>> valueListeners = {};
 private:
    #if JUCE_SUPPORT
     struct DynamicValueSource : juce::Value::ValueSource
@@ -626,7 +631,7 @@ private:
     };
 
     // Just have an empty member here if this type does not support juce's Value type
-    std::conditional_t<kIsOpaque, juce::ReferenceCountedObjectPtr<DynamicValueSource>, std::type_identity<void>> juceValue;
+    std::conditional_t<kIsOpaque, juce::ReferenceCountedObjectPtr<DynamicValueSource>, std::type_identity<void>> juceValue = {};
    #endif
 };
 

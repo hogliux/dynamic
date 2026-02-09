@@ -314,6 +314,22 @@ void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context,
 }
 
 template <typename T>
+template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+void Fundamental<T>::addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const
+{
+    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(std::move(context), std::move(lambda)));
+}
+
+#if JUCE_SUPPORT
+template <typename T>
+template <class ComponentType, std::invocable<ComponentType&, Fundamental<T> const&, T const&> Lambda>
+void Fundamental<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
+{
+    valueListeners.emplace_back(std::make_unique<ValueListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+}
+#endif
+
+template <typename T>
 bool Fundamental<T>::assign(Value const& other)
 {
     if (type() != other.type())
