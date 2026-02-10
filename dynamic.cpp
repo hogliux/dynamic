@@ -94,10 +94,8 @@ Object::Object(Object&& o) : Value(std::move(o)), childListeners(std::move(o.chi
 
 void Object::callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const
 {
-    childListeners.erase(std::remove_if(childListeners.begin(), childListeners.end(), [] (auto& ptr) { return ptr->expired(); }), childListeners.end());
-
     for (auto& listener : childListeners)
-        listener->invoke(id, op, parentOfChangedValue, newValue);
+        (*listener)(id, op, parentOfChangedValue, newValue);
 
     if (parent != nullptr)
     {

@@ -117,6 +117,70 @@ template <typename T> class Map;
 // Forward declaration of Field (needed by detail namespace utilities)
 template <typename T, fixstr::fixed_string Name> class Field;
 
+/**
+ * @brief RAII token for managing listener lifetime
+ *
+ * ListenerToken provides automatic listener removal via RAII. When the token
+ * is destroyed, the associated listener is automatically removed.
+ *
+ * Tokens are move-only and cannot be copied. Destroying a moved-from token
+ * has no effect.
+ *
+ * @code
+ * // Listener is active while token is in scope
+ * auto token = myValue.addListener([](auto const& val, auto const& newVal) {
+ *     std::cout << "Value changed to: " << newVal << std::endl;
+ * });
+ * // Listener is removed when token goes out of scope
+ * @endcode
+ */
+class ListenerToken
+{
+public:
+    /// Default constructor - creates an empty token
+    ListenerToken() = default;
+
+    /// Construct with a removal callback
+    explicit ListenerToken(std::function<void()> removeCallback_)
+        : removeCallback(std::move(removeCallback_)) {}
+
+    /// Destructor - removes the listener if this token owns one
+    ~ListenerToken()
+    {
+        if (removeCallback)
+            removeCallback();
+    }
+
+    /// Move constructor
+    ListenerToken(ListenerToken&& other) noexcept
+        : removeCallback(std::move(other.removeCallback))
+    {
+        other.removeCallback = nullptr;
+    }
+
+    /// Move assignment
+    ListenerToken& operator=(ListenerToken&& other) noexcept
+    {
+        if (this != &other)
+        {
+            if (removeCallback)
+                removeCallback();
+            removeCallback = std::move(other.removeCallback);
+            other.removeCallback = nullptr;
+        }
+        return *this;
+    }
+
+    /// Deleted copy constructor
+    ListenerToken(ListenerToken const&) = delete;
+
+    /// Deleted copy assignment
+    ListenerToken& operator=(ListenerToken const&) = delete;
+
+private:
+    std::function<void()> removeCallback;
+};
+
 //=============================================================================
 // Public API classes
 //=============================================================================
@@ -227,64 +291,17 @@ protected:
     Value(Value&& o);
 
     /**
-     * @brief Base class for listener storage with type-erased context
+     * @brief Binds a listener token to a context for automatic cleanup
      *
-     * Listeners are stored via weak_ptr to their context object, allowing
-     * automatic cleanup when the context is destroyed.
+     * Associates a ListenerToken with a weak_ptr to a context. When the
+     * context expires, the binding can be detected and removed, which
+     * destroys the token and removes the listener.
      */
-    template <typename... Args>
-    struct ListenerPairBase
+    struct ListenerBinding
     {
-        virtual ~ListenerPairBase() = default;
-
-        /// Invoke the listener with the provided arguments
-        virtual void invoke(Args...) = 0;
-
-        /// Check if the context weak_ptr has expired
-        virtual bool expired() const noexcept = 0;
+        std::weak_ptr<void> context;
+        ListenerToken token;
     };
-
-    /**
-     * @brief Concrete listener storage with typed context
-     *
-     * Holds a weak_ptr to the context and invokes the lambda with
-     * a locked shared_ptr when the listener fires.
-     */
-    template <typename Context, typename... Args>
-    struct ListenerPair : ListenerPairBase<Args...>
-    {
-        template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
-        ListenerPair(std::weak_ptr<Context>&& context_, Lambda && lambda_);
-
-        std::weak_ptr<Context> context;
-        std::function<void (std::shared_ptr<Context>&&, Args...)> lambda;
-
-        void invoke(Args... args) override;
-
-        bool expired() const noexcept override { return context.expired(); }
-    };
-
-   #if JUCE_SUPPORT
-    /**
-     * @brief Concrete listener storage with JUCE Component
-     *
-     * Holds a weak_ptr to the context and invokes the lambda with
-     * a locked shared_ptr when the listener fires.
-     */
-    template <typename ComponentType, typename... Args>
-    struct ListenerPairJUCE : ListenerPairBase<Args...>
-    {
-        template <std::invocable<ComponentType&, Args...> Lambda>
-        ListenerPairJUCE(ComponentType* context_, Lambda && lambda_);
-
-        juce::Component::SafePointer<ComponentType> context;
-        std::function<void (ComponentType&, Args...)> lambda;
-
-        void invoke(Args... args) override;
-
-        bool expired() const noexcept override { return context.getComponent() == nullptr; }
-    };
-   #endif
 
     Object* parent = nullptr;
     static thread_local std::size_t recursiveListenerDisabler;
@@ -386,23 +403,35 @@ public:
     virtual bool removeChild(std::string const& /*name*/) { assert(false); return false; }
 
     /**
-     * @brief Register a listener for changes to any child field
+     * @brief Register a listener for changes to any child field (token-based)
      *
      * The listener will be called when any field (including deeply nested fields)
-     * changes. The id parameter indicates which field changed relative to this struct.
+     * changes. The listener remains active until the returned token is destroyed.
+     *
+     * @param lambda Callback: (ID const& idToChangedObject, Operation operation, Object const& parent, Value const& newValue)
+     * @return ListenerToken that removes the listener when destroyed
+     */
+    template <std::invocable<ID const&, Operation, Object const&, Value const&> Lambda>
+    ListenerToken addChildListener(Lambda && lambda);
+
+    /**
+     * @brief Register a listener for changes to any child field (auto-cleanup)
+     *
+     * The listener will be called when any field (including deeply nested fields)
+     * changes. The listener is automatically removed when the context expires.
      *
      * @tparam Context Type deriving from std::enable_shared_from_this
      * @param context Pointer to the listener owner (kept via weak_ptr)
-     * @param lambda Callback: (shared_ptr<Context>&& context, ID const& idToChangedObject, Operation operation, Object const& parent, Value const& newValue)
+     * @param lambda Callback: (ID const& idToChangedObject, Operation operation, Object const& parent, Value const& newValue)
      */
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Operation, Object const&, Value const&> Lambda>
+    template <class Context, std::invocable<ID const&, Operation, Object const&, Value const&> Lambda>
     void addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
 
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Operation, Object const&, Value const&> Lambda>
+    template <class Context, std::invocable<ID const&, Operation, Object const&, Value const&> Lambda>
     void addChildListener(std::weak_ptr<Context>&& context, Lambda && lambda);
 
    #if JUCE_SUPPORT
-    template <class ComponentType, std::invocable<ComponentType&, ID const&, Operation, Object const&, Value const&> Lambda>
+    template <class ComponentType, std::invocable<ID const&, Operation, Object const&, Value const&> Lambda>
     void addChildListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
    #endif
 
@@ -461,17 +490,10 @@ private:
 
     void callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const;
 
-    using ChildListenerPairBase = Value::ListenerPairBase<ID const&, Operation, Object const&, Value const&>;
+    using ChildListenerFunction = std::function<void(ID const&, Operation, Object const&, Value const&)>;
 
-    template <typename Context>
-    using ChildListenerPair = ListenerPair<Context, ID const&, Operation, Object const&, Value const&>;
-
-   #if JUCE_SUPPORT
-    template <typename ComponentType>
-    using ChildListenerPairJUCE = ListenerPairJUCE<ComponentType, ID const&, Operation, Object const&, Value const&>;
-   #endif
-
-    mutable std::vector<std::unique_ptr<ChildListenerPairBase>> childListeners;
+    mutable std::vector<std::unique_ptr<ChildListenerFunction>> childListeners;
+    mutable std::vector<Value::ListenerBinding> managedChildListeners;
 };
 
 /**
@@ -574,24 +596,36 @@ public:
     operator T() const { return underlying; }
 
     /**
-     * @brief Register a listener for value changes
+     * @brief Register a listener for value changes (token-based)
      *
      * The listener will be called whenever this value changes via set() or mutate().
-     * The listener is stored via weak_ptr and automatically removed when expired.
+     * The listener remains active until the returned token is destroyed.
+     *
+     * @param lambda Callback: (Fundamental<T> const&, T const& newValue)
+     * @return ListenerToken that removes the listener when destroyed
+     */
+    template <std::invocable<Fundamental<T> const&, T const&> Lambda>
+    ListenerToken addListener(Lambda && lambda) const;
+
+    /**
+     * @brief Register a listener for value changes (auto-cleanup)
+     *
+     * The listener will be called whenever this value changes via set() or mutate().
+     * The listener is automatically removed when the context expires.
      *
      * @tparam Context Type deriving from std::enable_shared_from_this
      * @param context Pointer to the listener owner
-     * @param lambda Callback: (shared_ptr<Context>&&, Fundamental<T> const&, T const& newValue)
+     * @param lambda Callback: (Fundamental<T> const&, T const& newValue)
      */
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+    template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+    template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
     void addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const;
 
    #if JUCE_SUPPORT
-    template <class ComponentType, std::invocable<ComponentType&, Fundamental<T> const&, T const&> Lambda>
-    void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
+    template <class ComponentType, std::invocable<Fundamental<T> const&, T const&> Lambda>
+    void addListener(ComponentType* context, Lambda && lambda) const requires std::is_base_of_v<juce::Component, ComponentType>;
    #endif
 
     // overridden base methods
@@ -602,15 +636,7 @@ public:
    #endif
 
 protected:
-    using ValueListenerPairBase = typename Base::template ListenerPairBase<Fundamental<T> const&, T const&>;
-
-    template <typename Context>
-    using ValueListenerPair = typename Base::template ListenerPair<Context, Fundamental<T> const&, T const&>;
-
-   #if JUCE_SUPPORT
-     template <typename ComponentType>
-    using ValueListenerPairJUCE = typename Base::template ListenerPairJUCE<ComponentType, Fundamental<T> const&, T const&>;
-   #endif
+    using ValueListenerFunction = std::function<void(Fundamental<T> const&, T const&)>;
 
     void callListeners(T newValue);
 
@@ -618,7 +644,8 @@ protected:
     typename Value::ConstTypesVariant visit_helper() const override;
 
     T underlying;
-    mutable std::vector<std::unique_ptr<ValueListenerPairBase>> valueListeners = {};
+    mutable std::vector<std::unique_ptr<ValueListenerFunction>> valueListeners = {};
+    mutable std::vector<Value::ListenerBinding> managedValueListeners = {};
 private:
    #if JUCE_SUPPORT
     struct DynamicValueSource : juce::Value::ValueSource
@@ -823,7 +850,7 @@ namespace dynamic
  * @code
  * Array<Point> points;
  * points.addElement(Point{1.0f, 2.0f});
- * points.addListener(context, [](auto ctx, Operation op, auto& arr, auto& elem, size_t idx) {
+ * points.addListener(context, [](Operation op, auto& arr, auto& elem, size_t idx) {
  *     std::cout << "Element " << idx << " was " << (op == Operation::add ? "added" : "removed");
  * });
  * @endcode
@@ -884,24 +911,35 @@ public:
     void removeElement(std::size_t idx);
 
     /**
-     * @brief Register a listener for array changes
+     * @brief Register a listener for array changes (token-based)
      *
      * The listener will be called whenever this value changes via the add or
-     * remove methods.
-     * The listener is stored via weak_ptr and automatically removed when expired.
+     * remove methods. The listener remains active until the returned token is destroyed.
+     *
+     * @param lambda Callback: (Operation, Array<T> const&, T const& element, std::size_t index)
+     * @return ListenerToken that removes the listener when destroyed
+     */
+    template <std::invocable<Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    ListenerToken addListener(Lambda && lambda);
+
+    /**
+     * @brief Register a listener for array changes (auto-cleanup)
+     *
+     * The listener will be called whenever this value changes via the add or
+     * remove methods. The listener is automatically removed when the context expires.
      *
      * @tparam Context Type deriving from std::enable_shared_from_this
      * @param context Pointer to the listener owner
-     * @param lambda Callback: (shared_ptr<Context>&&, Fundamental<T> const&, T const& newValue)
+     * @param lambda Callback: (Operation, Array<T> const&, T const& element, std::size_t index)
      */
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    template <class Context, std::invocable<Operation, Array<T> const&, T const&, std::size_t> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
 
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    template <class Context, std::invocable<Operation, Array<T> const&, T const&, std::size_t> Lambda>
     void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
 
    #if JUCE_SUPPORT
-    template <class ComponentType, std::invocable<ComponentType&, Operation, Array<T> const&, T const&, std::size_t> Lambda>
+    template <class ComponentType, std::invocable<Operation, Array<T> const&, T const&, std::size_t> Lambda>
     void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
    #endif
 
@@ -966,20 +1004,13 @@ private:
         void init(Array& container_);
     };
 
-    using ArrayListenerPairBase = typename Object::ListenerPairBase<Operation, Array<T> const&, T const&, std::size_t>;
-
-    template <typename Context>
-    using ArrayListenerPair = typename Object::ListenerPair<Context, Operation, Array<T> const&, T const&, std::size_t>;
-
-   #if JUCE_SUPPORT
-    template <typename ComponentType>
-    using ArrayListenerPairJUCE = Object::ListenerPairJUCE<ComponentType, Operation, Array<T> const&, T const&, std::size_t>;
-   #endif
+    using ArrayListenerFunction = std::function<void(Operation, Array<T> const&, T const&, std::size_t)>;
 
     void callListeners(Operation op, T const& newValue, std::size_t idx) const;
 
     std::vector<Element> elements;
-    mutable std::vector<std::unique_ptr<ArrayListenerPairBase>> arrayListeners;
+    mutable std::vector<std::unique_ptr<ArrayListenerFunction>> arrayListeners;
+    mutable std::vector<Value::ListenerBinding> managedArrayListeners;
 };
 
 /**
@@ -1001,7 +1032,7 @@ private:
  * @code
  * Map<Point> points;
  * points.addElement("origin", Point{0.0f, 0.0f});
- * points.addListener(context, [](auto ctx, Operation op, auto& map, auto& val, auto key) {
+ * points.addListener(context, [](Operation op, auto& map, auto& val, auto key) {
  *     std::cout << "Key '" << key << "' was " << (op == Operation::add ? "added" : "removed");
  * });
  * @endcode
@@ -1065,24 +1096,35 @@ public:
     bool removeElement(std::string_view key);
 
     /**
-     * @brief Register a listener for map changes
+     * @brief Register a listener for map changes (token-based)
      *
      * The listener will be called whenever this value changes via the add or
-     * remove methods.
-     * The listener is stored via weak_ptr and automatically removed when expired.
+     * remove methods. The listener remains active until the returned token is destroyed.
+     *
+     * @param lambda Callback: (Operation, Map<T> const&, T const& value, std::string_view key)
+     * @return ListenerToken that removes the listener when destroyed
+     */
+    template <std::invocable<Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    ListenerToken addListener(Lambda && lambda);
+
+    /**
+     * @brief Register a listener for map changes (auto-cleanup)
+     *
+     * The listener will be called whenever this value changes via the add or
+     * remove methods. The listener is automatically removed when the context expires.
      *
      * @tparam Context Type deriving from std::enable_shared_from_this
      * @param context Pointer to the listener owner
-     * @param lambda Callback: (shared_ptr<Context>&&, Fundamental<T> const&, T const& newValue)
+     * @param lambda Callback: (Operation, Map<T> const&, T const& value, std::string_view key)
      */
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    template <class Context, std::invocable<Operation, Map<T> const&, T const&, std::string_view> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda);
 
-    template <class Context, std::invocable<std::shared_ptr<Context>&&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    template <class Context, std::invocable<Operation, Map<T> const&, T const&, std::string_view> Lambda>
     void addListener(std::weak_ptr<Context>&& context, Lambda && lambda);
 
    #if JUCE_SUPPORT
-    template <class ComponentType, std::invocable<ComponentType&, Operation, Map<T> const&, T const&, std::string_view> Lambda>
+    template <class ComponentType, std::invocable<Operation, Map<T> const&, T const&, std::string_view> Lambda>
     void addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>;
    #endif
 
@@ -1152,20 +1194,13 @@ private:
         void init(Map& container_);
     };
 
-    using MapListenerPairBase = typename Object::ListenerPairBase<Operation, Map<T> const&, T const&, std::string_view>;
-
-    template <typename Context>
-    using MapListenerPair = typename Object::ListenerPair<Context, Operation, Map<T> const&, T const&, std::string_view>;
-
-   #if JUCE_SUPPORT
-    template <typename ComponentType>
-    using MapListenerPairJUCE = Object::ListenerPairJUCE<ComponentType, Operation, Map<T> const&, T const&, std::string_view>;
-   #endif
+    using MapListenerFunction = std::function<void(Operation, Map<T> const&, T const&, std::string_view)>;
 
     void callListeners(Operation op, T const& newValue, std::string_view key) const;
 
     std::vector<Element> elements;
-    mutable std::vector<std::unique_ptr<MapListenerPairBase>> mapListeners;
+    mutable std::vector<std::unique_ptr<MapListenerFunction>> mapListeners;
+    mutable std::vector<Value::ListenerBinding> managedMapListeners;
 };
 
 /**

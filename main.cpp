@@ -55,12 +55,12 @@ struct Application : std::enable_shared_from_this<Application>
 
         Record<State> state;
 
-        state("points"_fld).addListener(this, [] (std::shared_ptr<Application> &&, Object::Operation, Array<Point> const& array, Point const& newValue, std::size_t idx)
+        state("points"_fld).addListener(this, [] (Object::Operation, Array<Point> const& array, Point const& newValue, std::size_t idx)
         {
             std::cout << "Fundamental { .x = " << newValue.x << ", .y = " << newValue.y << " } will be added to array " << array << " at index " << idx << std::endl;
         });
 
-        state.addChildListener(this, [] (std::shared_ptr<Application> &&, ID const& id, Object::Operation op,  Object const& parent, Value const & value)
+        state.addChildListener(this, [] (ID const& id, Object::Operation op,  Object const& parent, Value const & value)
         {
             switch (op)
             {

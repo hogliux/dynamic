@@ -96,61 +96,80 @@ constexpr bool Value::isOpaque()
     return true;
 }
 
-template <typename Context, typename... Args>
-template <std::invocable<std::shared_ptr<Context>&&, Args...> Lambda>
-Value::ListenerPair<Context, Args...>::ListenerPair(std::weak_ptr<Context>&& context_, Lambda && lambda_)
-    : context(std::move(context_)), lambda(std::move(lambda_))
-{}
-
-template <typename Context, typename... Args>
-void Value::ListenerPair<Context, Args...>::invoke(Args... args)
-{
-    if (lambda)
-    {
-        if (auto ptr = context.lock())
-            lambda(std::move(ptr), args...);
-    }
-}
-
-#if JUCE_SUPPORT
-template <typename ComponentType, typename... Args>
-template <std::invocable<ComponentType&, Args...> Lambda>
-Value::ListenerPairJUCE<ComponentType, Args...>::ListenerPairJUCE(ComponentType* context_, Lambda && lambda_)
-    : context(context_), lambda(std::move(lambda_))
-{}
-
-template <typename ComponentType, typename... Args>
-void Value::ListenerPairJUCE<ComponentType, Args...>::invoke(Args... args)
-{
-    if (lambda)
-    {
-        if (auto ptr = context.getComponent())
-            lambda(*ptr, args...);
-    }
-}
-#endif
-
-
 //=============================================================================
 // Object implementations
 //=============================================================================
-template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
-void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+template <std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
+ListenerToken Object::addChildListener(Lambda && lambda)
 {
-    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
+    // Add the listener to the vector
+    auto& listener = childListeners.emplace_back(std::make_unique<ChildListenerFunction>(std::move(lambda)));
+    auto* listenerPtr = listener.get();
+
+    // Return a token that removes this listener when destroyed
+    return ListenerToken([this, listenerPtr]()
+    {
+        auto it = std::find_if(childListeners.begin(), childListeners.end(),
+            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
+        if (it != childListeners.end())
+            childListeners.erase(it);
+    });
 }
 
-template <class Context, std::invocable<std::shared_ptr<Context>&&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
+template <class Context, std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
+void Object::addChildListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+{
+    addChildListener(context->weak_from_this(), std::move(lambda));
+}
+
+template <class Context, std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(std::weak_ptr<Context>&& context, Lambda && lambda)
 {
-    childListeners.emplace_back(std::make_unique<ChildListenerPair<Context>>(std::move(context), std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedChildListeners.erase(
+        std::remove_if(managedChildListeners.begin(), managedChildListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedChildListeners.end()
+    );
+
+    // Capture the weak_ptr and wrap the lambda
+    auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
+                        (ID const& id, Operation op, Object const& parent, Value const& value)
+    {
+        if (auto ctx = weakCtx.lock())
+            userLambda(id, op, parent, value);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addChildListener(std::move(wrappedLambda));
+    managedChildListeners.push_back({std::weak_ptr<void>(context), std::move(token)});
 }
 
 #if JUCE_SUPPORT
-template <class ComponentType, std::invocable<ComponentType&, ID const&, Object::Operation, Object const&, Value const&> Lambda>
+template <class ComponentType, std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
 void Object::addChildListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
 {
-    childListeners.emplace_back(std::make_unique<ChildListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedChildListeners.erase(
+        std::remove_if(managedChildListeners.begin(), managedChildListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedChildListeners.end()
+    );
+
+    // Create a SafePointer and wrap the lambda
+    juce::Component::SafePointer<ComponentType> safeContext(context);
+    auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
+                        (ID const& id, Operation op, Object const& parent, Value const& value)
+    {
+        if (auto* comp = safeContext.getComponent())
+            userLambda(id, op, parent, value);
+    };
+
+    // Add the token-based listener and store the token
+    // Note: We can't use weak_ptr for JUCE components, so we track expiry differently
+    // by checking the SafePointer in the wrapped lambda
+    auto token = addChildListener(std::move(wrappedLambda));
+    managedChildListeners.push_back({std::weak_ptr<void>(), std::move(token)});
 }
 #endif
 
@@ -307,25 +326,78 @@ void Fundamental<T>::mutate(Lambda && lambda)
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
-void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+template <std::invocable<Fundamental<T> const&, T const&> Lambda>
+ListenerToken Fundamental<T>::addListener(Lambda && lambda) const
 {
-    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
+    // Add the listener to the vector
+    auto& listener = valueListeners.emplace_back(std::make_unique<ValueListenerFunction>(std::move(lambda)));
+    auto* listenerPtr = listener.get();
+
+    // Return a token that removes this listener when destroyed
+    return ListenerToken([this, listenerPtr]()
+    {
+        auto it = std::find_if(valueListeners.begin(), valueListeners.end(),
+            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
+        if (it != valueListeners.end())
+            valueListeners.erase(it);
+    });
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Fundamental<T> const&, T const&> Lambda>
+template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
+void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
+{
+    addListener(context->weak_from_this(), std::move(lambda));
+}
+
+template <typename T>
+template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
 void Fundamental<T>::addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const
 {
-    valueListeners.emplace_back(std::make_unique<ValueListenerPair<Context>>(std::move(context), std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedValueListeners.erase(
+        std::remove_if(managedValueListeners.begin(), managedValueListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedValueListeners.end()
+    );
+
+    // Capture the weak_ptr and wrap the lambda
+    auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
+                        (Fundamental<T> const& fund, T const& newValue)
+    {
+        if (auto ctx = weakCtx.lock())
+            userLambda(fund, newValue);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedValueListeners.push_back({std::weak_ptr<void>(context), std::move(token)});
 }
 
 #if JUCE_SUPPORT
 template <typename T>
-template <class ComponentType, std::invocable<ComponentType&, Fundamental<T> const&, T const&> Lambda>
-void Fundamental<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
+template <class ComponentType, std::invocable<Fundamental<T> const&, T const&> Lambda>
+void Fundamental<T>::addListener(ComponentType* context, Lambda && lambda) const requires std::is_base_of_v<juce::Component, ComponentType>
 {
-    valueListeners.emplace_back(std::make_unique<ValueListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedValueListeners.erase(
+        std::remove_if(managedValueListeners.begin(), managedValueListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedValueListeners.end()
+    );
+
+    // Create a SafePointer and wrap the lambda
+    juce::Component::SafePointer<ComponentType> safeContext(context);
+    auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
+                        (Fundamental<T> const& fund, T const& newValue)
+    {
+        if (auto* comp = safeContext.getComponent())
+            userLambda(fund, newValue);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedValueListeners.push_back({std::weak_ptr<void>(), std::move(token)});
 }
 #endif
 
@@ -389,10 +461,8 @@ void Fundamental<T>::DynamicValueSource::setValue(juce::var const& newVar)
 template <typename T>
 void Fundamental<T>::callListeners(T newValue)
 {
-    valueListeners.erase(std::remove_if(valueListeners.begin(), valueListeners.end(), [] (auto& ptr) { return ptr->expired(); }), valueListeners.end());
-
     for (auto& listener : valueListeners)
-        listener->invoke(*this, newValue);
+        (*listener)(*this, newValue);
 
     if (Base::parent != nullptr)
     {
@@ -657,25 +727,78 @@ void Array<T>::removeElement(std::size_t idx)
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
-void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+template <std::invocable<Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+ListenerToken Array<T>::addListener(Lambda && lambda)
 {
-    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
+    // Add the listener to the vector
+    auto& listener = arrayListeners.emplace_back(std::make_unique<ArrayListenerFunction>(std::move(lambda)));
+    auto* listenerPtr = listener.get();
+
+    // Return a token that removes this listener when destroyed
+    return ListenerToken([this, listenerPtr]()
+    {
+        auto it = std::find_if(arrayListeners.begin(), arrayListeners.end(),
+            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
+        if (it != arrayListeners.end())
+            arrayListeners.erase(it);
+    });
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+template <class Context, std::invocable<Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+void Array<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+{
+    addListener(context->weak_from_this(), std::move(lambda));
+}
+
+template <typename T>
+template <class Context, std::invocable<Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
 void Array<T>::addListener(std::weak_ptr<Context> && context, Lambda && lambda)
 {
-    arrayListeners.emplace_back(std::make_unique<ArrayListenerPair<Context>>(std::move(context), std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedArrayListeners.erase(
+        std::remove_if(managedArrayListeners.begin(), managedArrayListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedArrayListeners.end()
+    );
+
+    // Capture the weak_ptr and wrap the lambda
+    auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
+                        (Operation op, Array<T> const& arr, T const& elem, std::size_t idx)
+    {
+        if (auto ctx = weakCtx.lock())
+            userLambda(op, arr, elem, idx);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedArrayListeners.push_back({std::weak_ptr<void>(context), std::move(token)});
 }
 
 #if JUCE_SUPPORT
 template <typename T>
-template <class ComponentType, std::invocable<ComponentType&, Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
+template <class ComponentType, std::invocable<Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
 void Array<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
 {
-    arrayListeners.emplace_back(std::make_unique<ArrayListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedArrayListeners.erase(
+        std::remove_if(managedArrayListeners.begin(), managedArrayListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedArrayListeners.end()
+    );
+
+    // Create a SafePointer and wrap the lambda
+    juce::Component::SafePointer<ComponentType> safeContext(context);
+    auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
+                        (Operation op, Array<T> const& arr, T const& elem, std::size_t idx)
+    {
+        if (auto* comp = safeContext.getComponent())
+            userLambda(op, arr, elem, idx);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedArrayListeners.push_back({std::weak_ptr<void>(), std::move(token)});
 }
 #endif
 
@@ -754,10 +877,8 @@ void Array<T>::Element::init(Array& container_)
 template <typename T>
 void Array<T>::callListeners(Operation op, T const& newValue, std::size_t idx) const
 {
-    arrayListeners.erase(std::remove_if(arrayListeners.begin(), arrayListeners.end(), [] (auto& ptr) { return ptr->expired(); }), arrayListeners.end());
-
     for (auto& listener : arrayListeners)
-        listener->invoke(op, *this, newValue, idx);
+        (*listener)(op, *this, newValue, idx);
 
     {
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
@@ -920,25 +1041,78 @@ bool Map<T>::removeElement(std::string_view key)
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
-void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+template <std::invocable<Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+ListenerToken Map<T>::addListener(Lambda && lambda)
 {
-    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(context->weak_from_this(), std::move(lambda)));
+    // Add the listener to the vector
+    auto& listener = mapListeners.emplace_back(std::make_unique<MapListenerFunction>(std::move(lambda)));
+    auto* listenerPtr = listener.get();
+
+    // Return a token that removes this listener when destroyed
+    return ListenerToken([this, listenerPtr]()
+    {
+        auto it = std::find_if(mapListeners.begin(), mapListeners.end(),
+            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
+        if (it != mapListeners.end())
+            mapListeners.erase(it);
+    });
 }
 
 template <typename T>
-template <class Context, std::invocable<std::shared_ptr<Context>&&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+template <class Context, std::invocable<Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+void Map<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda)
+{
+    addListener(context->weak_from_this(), std::move(lambda));
+}
+
+template <typename T>
+template <class Context, std::invocable<Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
 void Map<T>::addListener(std::weak_ptr<Context> && context, Lambda && lambda)
 {
-    mapListeners.emplace_back(std::make_unique<MapListenerPair<Context>>(std::move(context), std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedMapListeners.erase(
+        std::remove_if(managedMapListeners.begin(), managedMapListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedMapListeners.end()
+    );
+
+    // Capture the weak_ptr and wrap the lambda
+    auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
+                        (Operation op, Map<T> const& map, T const& val, std::string_view key)
+    {
+        if (auto ctx = weakCtx.lock())
+            userLambda(op, map, val, key);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedMapListeners.push_back({std::weak_ptr<void>(context), std::move(token)});
 }
 
 #if JUCE_SUPPORT
 template <typename T>
-template <class ComponentType, std::invocable<ComponentType&, Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
+template <class ComponentType, std::invocable<Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
 void Map<T>::addListener(ComponentType* context, Lambda && lambda) requires std::is_base_of_v<juce::Component, ComponentType>
 {
-    mapListeners.emplace_back(std::make_unique<MapListenerPairJUCE<ComponentType>>(context, std::move(lambda)));
+    // Clean up expired managed listeners first
+    managedMapListeners.erase(
+        std::remove_if(managedMapListeners.begin(), managedMapListeners.end(),
+            [](auto const& ml) { return ml.context.expired(); }),
+        managedMapListeners.end()
+    );
+
+    // Create a SafePointer and wrap the lambda
+    juce::Component::SafePointer<ComponentType> safeContext(context);
+    auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
+                        (Operation op, Map<T> const& map, T const& val, std::string_view key)
+    {
+        if (auto* comp = safeContext.getComponent())
+            userLambda(op, map, val, key);
+    };
+
+    // Add the token-based listener and store the token
+    auto token = addListener(std::move(wrappedLambda));
+    managedMapListeners.push_back({std::weak_ptr<void>(), std::move(token)});
 }
 #endif
 
@@ -1017,10 +1191,8 @@ void Map<T>::Element::init(Map& container_)
 template <typename T>
 void Map<T>::callListeners(Operation op, T const& newValue, std::string_view key) const
 {
-    mapListeners.erase(std::remove_if(mapListeners.begin(), mapListeners.end(), [] (auto& ptr) { return ptr->expired(); }), mapListeners.end());
-
     for (auto& listener : mapListeners)
-        listener->invoke(op, *this, newValue, key);
+        (*listener)(op, *this, newValue, key);
 
     {
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
