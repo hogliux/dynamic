@@ -134,10 +134,10 @@ void Object::addChildListener(std::weak_ptr<Context>&& context, Lambda && lambda
 
     // Capture the weak_ptr and wrap the lambda
     auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
-                        (ID const& id, Operation op, Object const& parent, Value const& value)
+                        (ID const& id, Operation op, Object const& parent_, Value const& value)
     {
         if (auto ctx = weakCtx.lock())
-            userLambda(id, op, parent, value);
+            userLambda(id, op, parent_, value);
     };
 
     // Add the token-based listener and store the token
@@ -159,10 +159,10 @@ void Object::addChildListener(ComponentType* context, Lambda && lambda) requires
     // Create a SafePointer and wrap the lambda
     juce::Component::SafePointer<ComponentType> safeContext(context);
     auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
-                        (ID const& id, Operation op, Object const& parent, Value const& value)
+                        (ID const& id, Operation op, Object const& parent_, Value const& value)
     {
         if (auto* comp = safeContext.getComponent())
-            userLambda(id, op, parent, value);
+            userLambda(id, op, parent_, value);
     };
 
     // Add the token-based listener and store the token
