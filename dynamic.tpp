@@ -270,7 +270,7 @@ void Fundamental<T>::set(T const& newValue)
         if (std::fabs(underlying - newValue) <= std::numeric_limits<T>::epsilon())
             return;
     }
-    else
+    else if constexpr (requires(T const& a, T const& b) { { a == b } -> std::convertible_to<bool>; })
     {
         if (underlying == newValue)
             return;
@@ -310,7 +310,15 @@ void Fundamental<T>::mutate(Lambda && lambda)
     T copy(underlying);
     lambda(copy);
 
-    if (copy != underlying)
+    auto const changed = [&]
+    {
+        if constexpr (requires(T const& a, T const& b) { { a != b } -> std::convertible_to<bool>; })
+            return copy != underlying;
+        else
+            return true; // assume changed for types without operator!=
+    }();
+
+    if (changed)
     {
         if (Value::recursiveListenerDisabler == 0)
             callListeners(copy);
@@ -952,10 +960,8 @@ bool Array<T>::removeChild(std::string const& name)
     removeElement(static_cast<std::size_t>(index));
     return true;
 }
-} //namespace dynamic
-
 template <typename T>
-bool operator==(dynamic::Array<T> const& aarray, dynamic::Array<T> const& barray)
+bool operator==(Array<T> const& aarray, Array<T> const& barray)
 {
     auto const n = aarray.elements.size();
 
@@ -973,6 +979,8 @@ bool operator==(dynamic::Array<T> const& aarray, dynamic::Array<T> const& barray
 
     return true;
 }
+
+} //namespace dynamic
 
 namespace dynamic
 {
@@ -1243,10 +1251,8 @@ bool Map<T>::removeChild(std::string const& name)
     removeElement(name);
     return true;
 }
-} //namespace dynamic
-
 template <typename T>
-bool operator==(dynamic::Map<T> const& amap, dynamic::Map<T> const& bmap)
+bool operator==(Map<T> const& amap, Map<T> const& bmap)
 {
     auto const n = amap.elements.size();
 
@@ -1267,6 +1273,8 @@ bool operator==(dynamic::Map<T> const& amap, dynamic::Map<T> const& bmap)
 
     return true;
 }
+
+} //namespace dynamic
 
 namespace dynamic
 {

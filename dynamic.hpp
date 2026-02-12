@@ -852,10 +852,12 @@ private:
 
     void init();
 };
-} //namespace dynamic
 
-template <typename T> bool operator==(dynamic::Array<T> const&, dynamic::Array<T> const&);
-template <typename T> bool operator==(dynamic::Map<T>   const&, dynamic::Map<T>   const&);
+
+template <typename T> bool operator==(Array<T> const&, Array<T> const&);
+template <typename T> bool operator==(Map<T>   const&, Map<T>   const&);
+
+} //namespace dynamic
 
 namespace dynamic
 {

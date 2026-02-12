@@ -42,3 +42,9 @@ endif()
 
 add_library(dynamic STATIC dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
 add_executable(example main.cpp dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
+
+# Unit tests
+enable_testing()
+add_executable(dynamic_test dynamic_test.cpp dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
+target_include_directories(dynamic_test PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME dynamic_test COMMAND dynamic_test)
