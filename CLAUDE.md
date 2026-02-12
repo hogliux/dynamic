@@ -12,6 +12,7 @@ Key capabilities:
 - Change listeners with automatic propagation through nested hierarchies
 - Path-based addressing for nested fields (e.g., "line/start/x")
 - Generic containers (Array<T>, Map<T>) with reflection support
+- Static MetaType introspection without requiring instances
 
 ## Build System
 
@@ -56,6 +57,13 @@ Value (abstract base)
     ├── Record<T> (when T contains Field<> members)
     ├── Array<T> (dynamic array with reflection)
     └── Map<T> (dynamic map with reflection)
+
+MetaType (abstract base - static type introspection)
+├── InvalidMeta (void/invalid type)
+├── FundamentalMeta<T> (opaque types: int, float, string, etc.)
+├── RecordMeta<T> (struct types with Field<> members)
+├── ArrayMeta<T> (Array<T> containers)
+└── MapMeta<T> (Map<T> containers)
 ```
 
 ### Key Design Patterns
@@ -85,6 +93,15 @@ Value (abstract base)
    - Enables change propagation up the hierarchy
    - Allows path reconstruction for nested field changes
 
+6. **MetaType System**: Static type introspection without requiring instances
+   - Each Dynamic wrapper type has a corresponding `MetaType` subclass (singleton)
+   - Accessible via static `meta()` method (e.g., `Record<Point>::meta()`) or `metaTypeOf<T>()`
+   - Also accessible from instances via `Value::metaType()` virtual method
+   - `FieldDescriptor` describes record fields with lazy `metaType()` function pointers to avoid static init order issues
+   - Factory pattern: `MetaType::construct()` creates instances without knowing the concrete type
+   - `MetaTypeHelper<T>` dispatches to the correct MetaType subclass at compile time
+   - Partial specializations handle `Array<T>` and `Map<T>` container types
+
 ### Compile-Time Field Access
 
 The `"fieldname"_fld` user-defined literal creates `CompileTimeString<>` tags for type-safe field access:
@@ -99,10 +116,10 @@ This is implemented via a GNU string literal operator template (requires `-Wno-g
 ## File Structure
 
 ### Core Files
-- `dynamic.hpp` - Main header with class declarations (~1270 lines)
+- `dynamic.hpp` - Main header with class declarations (~1450 lines)
 - `dynamic.tpp` - Template implementations (included at end of dynamic.hpp)
 - `dynamic.cpp` - Non-template implementations
-- `dynamic_detail.hpp` - Internal helper utilities and type traits
+- `dynamic_detail.hpp` - Internal helper utilities and type traits (including `field_value_type_t<F>` for extracting value types from `Field<T, Name>`)
 
 ### Dependencies
 - `fixed_string.hpp` - Compile-time string handling for field names
@@ -152,6 +169,25 @@ using SupportedFundamentalTypes = std::tuple<
 - `std::weak_ptr<void>` used for type-erased context storage
 - The `recursiveListenerDisabler` thread_local counter prevents infinite recursion
 - JUCE support via `Component::SafePointer` for component-based contexts
+
+### MetaType System
+
+The MetaType system provides compile-time type metadata accessible at runtime without requiring instances.
+
+**Architecture:**
+- `MetaType` is an abstract base class with virtual methods: `typeInfo()`, `isOpaque()`, `isRecord()`, `isArray()`, `isMap()`, `fields()`, `elementMetaType()`, `construct()`
+- Concrete implementations in `detail` namespace: `InvalidMeta`, `FundamentalMeta<T>`, `RecordMeta<T>`, `ArrayMeta<T>`, `MapMeta<T>`
+- `FieldDescriptor` struct holds `string_view name` and a `MetaType const& (*metaType)()` function pointer for lazy resolution
+- `detail::MetaTypeHelper<T>` primary template dispatches based on `Value::isOpaque<T>()`; partial specializations handle `Array<T>` and `Map<T>`
+
+**Access patterns:**
+1. Static (no instance): `Record<Point>::meta()`, `Array<T>::meta()`, `Map<T>::meta()`
+2. Free function: `metaTypeOf<T>()` for any supported type
+3. Virtual (from instance): `value.metaType()` on any `Value&`
+
+**Factory method:**
+- `MetaType::construct()` returns `std::unique_ptr<Value>` — creates the appropriate wrapper type
+- `InvalidMeta::construct()` returns `nullptr`
 
 ### Path-Based Addressing
 
@@ -239,6 +275,31 @@ struct App : std::enable_shared_from_this<App> {
 - Token-based: Explicit control via RAII token
 - Weak_ptr-based: Automatic cleanup when context expires
 - Lambda signatures: No context parameter - capture `this` instead
+
+### Using MetaType for Static Introspection
+
+```cpp
+// Inspect fields without creating an instance
+auto const& meta = Record<Line>::meta();
+for (auto const& field : meta.fields()) {
+    std::cout << field.name;
+    if (field.metaType().isRecord())
+        std::cout << " (record, " << field.metaType().fields().size() << " fields)";
+    std::cout << std::endl;
+}
+
+// Construct instances via factory
+auto instance = meta.construct();  // Creates a Record<Line>
+
+// Free function access
+auto const& floatMeta = metaTypeOf<float>();
+std::cout << floatMeta.isOpaque() << std::endl;  // true
+
+// Container element introspection
+auto const& arrayMeta = Array<Point>::meta();
+auto const* elemMeta = arrayMeta.elementMetaType();
+std::cout << elemMeta->isRecord() << std::endl;  // true
+```
 
 ## Compiler-Specific Notes
 

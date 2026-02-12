@@ -36,6 +36,7 @@
 #include <cassert>
 #include <cstddef>
 #include <iterator>
+#include <span>
 #include <utility>
 #include <variant>
 #include "fixed_string.hpp"
@@ -116,6 +117,22 @@ template <typename T> class Map;
 
 // Forward declaration of Field (needed by detail namespace utilities)
 template <typename T, fixstr::fixed_string Name> class Field;
+
+// Forward declarations for MetaType system
+class MetaType;
+
+/**
+ * @brief Describes a single field within a Record's MetaType
+ *
+ * Provides the field name and a function pointer to lazily obtain the
+ * MetaType of the field's underlying type, avoiding static initialization
+ * order issues with recursive/nested types.
+ */
+struct FieldDescriptor
+{
+    std::string_view name;
+    MetaType const& (*metaType)();
+};
 
 /**
  * @brief RAII token for managing listener lifetime
@@ -225,6 +242,9 @@ public:
     /// Returns the std::type_info for the underlying value type
     virtual std::type_info const& type() const = 0;
 
+    /// Returns the MetaType descriptor for this value's type
+    virtual MetaType const& metaType() const = 0;
+
     /// Returns true if this value represents a struct with fields
     virtual bool isStruct() const { return false; }
 
@@ -330,6 +350,7 @@ public:
     constexpr Invalid() = default;
 
     std::type_info const& type() const override { return typeid(void); }
+    MetaType const& metaType() const override;
     bool isValid() const override { return false; }
     constexpr operator bool() const { return false; }
     bool assign(Value const&) override { return false; }
@@ -472,6 +493,7 @@ public:
     // in a required cause. This should not require us to implement virtual base methods, but
     // apparently macOS clang requires this for some reason
     std::type_info const& type() const override { assert(false); return typeid(void); }
+    MetaType const& metaType() const override;
     bool isValid() const override { assert(false); return false; }
     bool assign(Value const&) override { assert(false); return false; }
 
@@ -553,6 +575,12 @@ public:
 
     /// Returns the type_info for the underlying type T
     std::type_info const& type() const override { return typeid(T); }
+
+    /// Returns the MetaType for the underlying type T (static, no instance needed)
+    static MetaType const& meta();
+
+    /// Returns the MetaType for this value's underlying type
+    MetaType const& metaType() const override;
 
     /// Always returns true - Fundamental values are always valid
     bool isValid() const override { return true; }
@@ -865,6 +893,12 @@ public:
     /// Returns the type_info for Array<T>
     std::type_info const& type() const override { return typeid(Array<T>); }
 
+    /// Returns the MetaType for Array<T> (static, no instance needed)
+    static MetaType const& meta();
+
+    /// Returns the MetaType for this array type
+    MetaType const& metaType() const override;
+
     /// Always returns true - arrays are always valid containers
     bool isValid() const override { return true; }
 
@@ -1044,8 +1078,14 @@ public:
     Map() = default;
     Map(Map const& o);
 
-    /// Returns the type_info for Array<T> (note: returns Array<T> due to implementation)
-    std::type_info const& type() const override { return typeid(Array<T>); }
+    /// Returns the type_info for Map<T>
+    std::type_info const& type() const override { return typeid(Map<T>); }
+
+    /// Returns the MetaType for Map<T> (static, no instance needed)
+    static MetaType const& meta();
+
+    /// Returns the MetaType for this map type
+    MetaType const& metaType() const override;
 
     /// Always returns true - maps are always valid containers
     bool isValid() const override { return true; }
@@ -1248,6 +1288,108 @@ public:
     /// Returns the compile-time field name as specified in the template parameter
     std::string name() const override;
 };
+
+//=============================================================================
+// MetaType system - compile-time type reflection without instances
+//=============================================================================
+
+/**
+ * @brief Abstract base class for compile-time type metadata
+ *
+ * MetaType provides a type-erased interface for inspecting Dynamic types
+ * without requiring an instance. Each Dynamic wrapper type (Fundamental, Record,
+ * Array, Map) has a corresponding MetaType that describes:
+ *   - The underlying C++ type (via typeInfo())
+ *   - Whether it's opaque, a record, array, or map
+ *   - For records: field names and their MetaTypes (via fields())
+ *   - For containers: the element MetaType (via elementMetaType())
+ *   - A factory method to construct instances (via construct())
+ *
+ * Access MetaType without an instance using the static meta() method:
+ * @code
+ * auto const& meta = Record<Point>::meta();
+ * for (auto const& field : meta.fields())
+ *     std::cout << field.name << std::endl;
+ *
+ * auto instance = meta.construct();  // Creates a Record<Point>
+ * @endcode
+ *
+ * Or from an existing Value reference:
+ * @code
+ * void inspect(Value const& v) {
+ *     for (auto const& field : v.metaType().fields())
+ *         std::cout << field.name << std::endl;
+ * }
+ * @endcode
+ */
+class MetaType
+{
+public:
+    virtual ~MetaType() = default;
+
+    /// Returns the std::type_info for the underlying type
+    virtual std::type_info const& typeInfo() const = 0;
+
+    /// Returns true if this is an opaque/fundamental type (not a struct with Fields)
+    virtual bool isOpaque() const = 0;
+
+    /// Returns true if this is a Record type (struct with Field<> members)
+    virtual bool isRecord() const { return false; }
+
+    /// Returns true if this is an Array<T> type
+    virtual bool isArray() const { return false; }
+
+    /// Returns true if this is a Map<T> type
+    virtual bool isMap() const { return false; }
+
+    /**
+     * @brief Returns field descriptors for Record types
+     *
+     * For Record types, returns a span of FieldDescriptor entries describing
+     * each field's name and MetaType. For non-Record types, returns an empty span.
+     *
+     * @return Span of field descriptors (empty for non-Record types)
+     */
+    virtual std::span<FieldDescriptor const> fields() const { return {}; }
+
+    /**
+     * @brief Returns the MetaType of container elements
+     *
+     * For Array<T> and Map<T>, returns a pointer to the MetaType describing T.
+     * For non-container types, returns nullptr.
+     *
+     * @return Pointer to element MetaType, or nullptr
+     */
+    virtual MetaType const* elementMetaType() const { return nullptr; }
+
+    /**
+     * @brief Construct a new instance of the Dynamic wrapper type
+     *
+     * Creates a heap-allocated instance of the appropriate wrapper:
+     *   - FundamentalMeta<T> creates Fundamental<T>
+     *   - RecordMeta<T> creates Record<T>
+     *   - ArrayMeta<T> creates Array<T>
+     *   - MapMeta<T> creates Map<T>
+     *
+     * @return unique_ptr to the newly constructed Value, or nullptr for Invalid
+     */
+    virtual std::unique_ptr<Value> construct() const = 0;
+};
+
+/**
+ * @brief Get the MetaType for a given C++ type T
+ *
+ * Maps any supported type to its MetaType singleton:
+ *   - Opaque types (int, float, string, etc.) → FundamentalMeta
+ *   - Structs with Field<> members → RecordMeta
+ *   - Array<T> → ArrayMeta
+ *   - Map<T> → MapMeta
+ *
+ * @tparam T The type to get metadata for
+ * @return Reference to the MetaType singleton for T
+ */
+template <typename T>
+MetaType const& metaTypeOf();
 
 // Equality and stream output operators
 bool operator==(ID const& lhs, ID const& rhs);

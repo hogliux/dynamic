@@ -136,6 +136,13 @@ template <typename T>
 using BaseTypeFor = std::conditional_t<requires (T t) { [] <typename U> (Array<U>&){}(t); } || requires (T t) { [] <typename U> (Map<U>&){}(t); }, T,
                                        std::conditional_t<num_fields<T>() >= 1, Record<T>, Fundamental<T>>>;
 
+/// Extract the value type T from a Field<T, Name>
+template <typename F> struct field_value_type;
+template <typename T, fixstr::fixed_string Name>
+struct field_value_type<Field<T, Name>> { using type = T; };
+template <typename F>
+using field_value_type_t = typename field_value_type<F>::type;
+
 template<template<typename, typename> class Cls, typename T>
 struct BindFirst
 {

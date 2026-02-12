@@ -127,10 +127,88 @@ struct Application : std::enable_shared_from_this<Application>
     }
 };
 
+void metaTypeExamples()
+{
+    std::cout << "\n=== MetaType Examples ===\n\n";
+
+    // 1. Inspect a Record type without creating an instance
+    std::cout << "--- Record<Point> fields (no instance needed) ---\n";
+    auto const& pointMeta = Record<Point>::meta();
+    for (auto const& field : pointMeta.fields())
+        std::cout << "  " << field.name << " (opaque: " << field.metaType().isOpaque() << ")\n";
+
+    // 2. Inspect nested Record types recursively
+    std::cout << "\n--- Record<Line> fields (nested introspection) ---\n";
+    auto const& lineMeta = Record<Line>::meta();
+    for (auto const& field : lineMeta.fields())
+    {
+        auto const& fieldMeta = field.metaType();
+        std::cout << "  " << field.name;
+
+        if (fieldMeta.isRecord())
+        {
+            std::cout << " (record with fields:";
+            for (auto const& nested : fieldMeta.fields())
+                std::cout << " " << nested.name;
+            std::cout << ")\n";
+        }
+        else
+        {
+            std::cout << " (opaque)\n";
+        }
+    }
+
+    // 3. Full State introspection including containers
+    std::cout << "\n--- Record<State> fields ---\n";
+    auto const& stateMeta = Record<State>::meta();
+    for (auto const& field : stateMeta.fields())
+    {
+        auto const& fieldMeta = field.metaType();
+        std::cout << "  " << field.name;
+
+        if (fieldMeta.isRecord())
+            std::cout << " [record, " << fieldMeta.fields().size() << " fields]";
+        else if (fieldMeta.isArray())
+            std::cout << " [array, element is " << (fieldMeta.elementMetaType()->isRecord() ? "record" : "opaque") << "]";
+        else if (fieldMeta.isMap())
+            std::cout << " [map, element is " << (fieldMeta.elementMetaType()->isRecord() ? "record" : "opaque") << "]";
+        else
+            std::cout << " [opaque]";
+
+        std::cout << "\n";
+    }
+
+    // 4. Construct instances via MetaType factory
+    std::cout << "\n--- Construct via MetaType ---\n";
+    auto pointInstance = pointMeta.construct();
+    std::cout << "  Constructed Record<Point>: " << static_cast<Object&>(*pointInstance) << "\n";
+
+    auto arrayInstance = Array<Point>::meta().construct();
+    std::cout << "  Constructed Array<Point>, isStruct: " << arrayInstance->isStruct() << "\n";
+
+    // 5. metaType() on an existing Value reference (runtime introspection)
+    std::cout << "\n--- Runtime metaType() from Value& ---\n";
+    Record<State> state;
+    Value& lineField = state("line"_fld);
+    auto const& runtimeMeta = lineField.metaType();
+    std::cout << "  state.line has " << runtimeMeta.fields().size() << " fields:";
+    for (auto const& field : runtimeMeta.fields())
+        std::cout << " " << field.name;
+    std::cout << "\n";
+
+    // 6. Use metaTypeOf<T>() free function
+    std::cout << "\n--- metaTypeOf<T>() ---\n";
+    std::cout << "  metaTypeOf<float>().isOpaque() = " << metaTypeOf<float>().isOpaque() << "\n";
+    std::cout << "  metaTypeOf<Point>().isRecord() = " << metaTypeOf<Point>().isRecord() << "\n";
+    std::cout << "  metaTypeOf<Point>().fields().size() = " << metaTypeOf<Point>().fields().size() << "\n";
+}
+
 int main()
 {
     auto app = std::make_shared<Application>();
     app->run();
+
+    metaTypeExamples();
 
     return 0;
 }

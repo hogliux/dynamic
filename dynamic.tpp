@@ -1296,6 +1296,219 @@ std::string Field<T, Name>::name() const
 }
 
 //=============================================================================
+// MetaType implementations
+//=============================================================================
+
+namespace detail
+{
+
+/// MetaType for Invalid (void type)
+class InvalidMeta final : public MetaType
+{
+public:
+    std::type_info const& typeInfo() const override { return typeid(void); }
+    bool isOpaque() const override { return true; }
+    std::unique_ptr<Value> construct() const override { return nullptr; }
+};
+
+inline MetaType const& invalidMetaType()
+{
+    static InvalidMeta instance;
+    return instance;
+}
+
+/// MetaType for opaque/fundamental types (int, float, string, etc.)
+template <typename T>
+class FundamentalMeta final : public MetaType
+{
+public:
+    std::type_info const& typeInfo() const override { return typeid(T); }
+    bool isOpaque() const override { return true; }
+
+    std::unique_ptr<Value> construct() const override
+    {
+        return std::make_unique<Fundamental<T>>();
+    }
+};
+
+/// MetaType for struct types with Field<> members
+template <typename T>
+class RecordMeta final : public MetaType
+{
+    using FieldsTuple = typename Record<T>::FieldsAsTuple;
+    static constexpr auto kNumFields = std::tuple_size_v<FieldsTuple>;
+
+    template <std::size_t... Is>
+    static std::array<FieldDescriptor, kNumFields> makeDescriptors(std::index_sequence<Is...>)
+    {
+        return {{
+            FieldDescriptor{
+                Record<T>::kFieldNames[Is],
+                &metaTypeOf<field_value_type_t<std::tuple_element_t<Is, FieldsTuple>>>
+            }...
+        }};
+    }
+
+public:
+    std::type_info const& typeInfo() const override { return typeid(T); }
+    bool isOpaque() const override { return false; }
+    bool isRecord() const override { return true; }
+
+    std::span<FieldDescriptor const> fields() const override
+    {
+        static auto const descriptors = makeDescriptors(std::make_index_sequence<kNumFields>{});
+        return {descriptors.data(), descriptors.size()};
+    }
+
+    std::unique_ptr<Value> construct() const override
+    {
+        return std::make_unique<Record<T>>();
+    }
+};
+
+/// MetaType for Array<T> containers
+template <typename T>
+class ArrayMeta final : public MetaType
+{
+public:
+    std::type_info const& typeInfo() const override { return typeid(Array<T>); }
+    bool isOpaque() const override { return false; }
+    bool isArray() const override { return true; }
+
+    MetaType const* elementMetaType() const override
+    {
+        return &metaTypeOf<T>();
+    }
+
+    std::unique_ptr<Value> construct() const override
+    {
+        return std::make_unique<Array<T>>();
+    }
+};
+
+/// MetaType for Map<T> containers
+template <typename T>
+class MapMeta final : public MetaType
+{
+public:
+    std::type_info const& typeInfo() const override { return typeid(Map<T>); }
+    bool isOpaque() const override { return false; }
+    bool isMap() const override { return true; }
+
+    MetaType const* elementMetaType() const override
+    {
+        return &metaTypeOf<T>();
+    }
+
+    std::unique_ptr<Value> construct() const override
+    {
+        return std::make_unique<Map<T>>();
+    }
+};
+
+/// Primary MetaTypeHelper: dispatches based on whether T is opaque or a record
+template <typename T>
+struct MetaTypeHelper
+{
+    static MetaType const& get()
+    {
+        if constexpr (! Value::isOpaque<T>())
+        {
+            static RecordMeta<T> instance;
+            return instance;
+        }
+        else
+        {
+            static FundamentalMeta<T> instance;
+            return instance;
+        }
+    }
+};
+
+/// Partial specialization for Array<T>
+template <typename T>
+struct MetaTypeHelper<Array<T>>
+{
+    static MetaType const& get()
+    {
+        static ArrayMeta<T> instance;
+        return instance;
+    }
+};
+
+/// Partial specialization for Map<T>
+template <typename T>
+struct MetaTypeHelper<Map<T>>
+{
+    static MetaType const& get()
+    {
+        static MapMeta<T> instance;
+        return instance;
+    }
+};
+
+} // namespace detail
+
+// metaTypeOf<T>() implementation
+template <typename T>
+MetaType const& metaTypeOf()
+{
+    return detail::MetaTypeHelper<T>::get();
+}
+
+// Invalid::metaType() implementation
+inline MetaType const& Invalid::metaType() const
+{
+    return detail::invalidMetaType();
+}
+
+// Object::metaType() workaround implementation (macOS clang bug - see declaration)
+inline MetaType const& Object::metaType() const
+{
+    assert(false);
+    return detail::invalidMetaType();
+}
+
+// Fundamental<T>::meta() and metaType() implementations
+template <typename T>
+MetaType const& Fundamental<T>::meta()
+{
+    return metaTypeOf<T>();
+}
+
+template <typename T>
+MetaType const& Fundamental<T>::metaType() const
+{
+    return metaTypeOf<T>();
+}
+
+// Array<T>::meta() and metaType() implementations
+template <typename T>
+MetaType const& Array<T>::meta()
+{
+    return metaTypeOf<Array<T>>();
+}
+
+template <typename T>
+MetaType const& Array<T>::metaType() const
+{
+    return metaTypeOf<Array<T>>();
+}
+
+// Map<T>::meta() and metaType() implementations
+template <typename T>
+MetaType const& Map<T>::meta()
+{
+    return metaTypeOf<Map<T>>();
+}
+
+template <typename T>
+MetaType const& Map<T>::metaType() const
+{
+    return metaTypeOf<Map<T>>();
+}
+
+//=============================================================================
 // Stream operators implementations
 //=============================================================================
 
