@@ -40,17 +40,13 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 endif()
 
-# Boost.PFR (vendored headers)
-set(PFR_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/3rdparty/pfr/include)
 
 add_library(dynamic STATIC dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
-target_include_directories(dynamic PUBLIC ${PFR_INCLUDE_DIR})
 
 add_executable(example main.cpp dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
-target_include_directories(example PRIVATE ${PFR_INCLUDE_DIR})
 
 # Unit tests
 enable_testing()
 add_executable(dynamic_test dynamic_test.cpp dynamic.cpp CxxUtilities.hpp dynamic.hpp dynamic_detail.hpp dynamic.tpp)
-target_include_directories(dynamic_test PRIVATE ${CMAKE_SOURCE_DIR} ${PFR_INCLUDE_DIR})
+target_include_directories(dynamic_test PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME dynamic_test COMMAND dynamic_test)
