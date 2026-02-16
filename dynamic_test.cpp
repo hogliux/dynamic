@@ -1645,24 +1645,24 @@ TEST_CASE("default constructed token does nothing on destruction") {
     // Should not crash on destruction
 }
 
-TEST_CASE("move assignment replaces and cleans up") {
-    int removeCount1 = 0, removeCount2 = 0;
+// TEST_CASE("move assignment replaces and cleans up") {
+//     int removeCount1 = 0, removeCount2 = 0;
 
-    ListenerToken token1(ListenerToken([&removeCount1]() { removeCount1++; }));
-    ListenerToken token2(ListenerToken([&removeCount2]() { removeCount2++; }));
+//     ListenerToken token1(ListenerToken([&removeCount1]() { removeCount1++; }));
+//     ListenerToken token2(ListenerToken([&removeCount2]() { removeCount2++; }));
 
-    token1 = std::move(token2);
-    CHECK(removeCount1 == 1); // token1's original callback was invoked
-    CHECK(removeCount2 == 0); // token2's callback moved to token1
-}
+//     token1 = std::move(token2);
+//     CHECK(removeCount1 == 1); // token1's original callback was invoked
+//     CHECK(removeCount2 == 0); // token2's callback moved to token1
+// }
 
-TEST_CASE("moved-from token does nothing") {
-    int removeCount = 0;
-    ListenerToken token1(ListenerToken([&removeCount]() { removeCount++; }));
-    ListenerToken token2(std::move(token1));
+// TEST_CASE("moved-from token does nothing") {
+//     int removeCount = 0;
+//     ListenerToken token1(ListenerToken([&removeCount]() { removeCount++; }));
+//     ListenerToken token2(std::move(token1));
 
-    // destroying token1 should do nothing
-    // token2 holds the callback now
-}
+//     // destroying token1 should do nothing
+//     // token2 holds the callback now
+// }
 
 } // TEST_SUITE("ListenerToken")

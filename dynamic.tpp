@@ -102,18 +102,11 @@ constexpr bool Value::isOpaque()
 template <std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
 ListenerToken Object::addChildListener(Lambda && lambda)
 {
-    // Add the listener to the vector
-    auto& listener = childListeners.emplace_back(std::make_unique<ChildListenerFunction>(std::move(lambda)));
-    auto* listenerPtr = listener.get();
+    ListenerToken token(ListenerToken::private_constructor_t{});
 
-    // Return a token that removes this listener when destroyed
-    return ListenerToken([this, listenerPtr]()
-    {
-        auto it = std::find_if(childListeners.begin(), childListeners.end(),
-            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
-        if (it != childListeners.end())
-            childListeners.erase(it);
-    });
+    // Add the listener to the vector
+    childListeners.emplace(std::weak_ptr<ListenerToken::Impl>(token.token), std::move(lambda));
+    return token;
 }
 
 template <class Context, std::invocable<ID const&, Object::Operation, Object const&, Value const&> Lambda>
@@ -337,18 +330,11 @@ template <typename T>
 template <std::invocable<Fundamental<T> const&, T const&> Lambda>
 ListenerToken Fundamental<T>::addListener(Lambda && lambda) const
 {
-    // Add the listener to the vector
-    auto& listener = valueListeners.emplace_back(std::make_unique<ValueListenerFunction>(std::move(lambda)));
-    auto* listenerPtr = listener.get();
+    ListenerToken token(ListenerToken::private_constructor_t{});
 
-    // Return a token that removes this listener when destroyed
-    return ListenerToken([this, listenerPtr]()
-    {
-        auto it = std::find_if(valueListeners.begin(), valueListeners.end(),
-            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
-        if (it != valueListeners.end())
-            valueListeners.erase(it);
-    });
+    // Add the listener to the vector
+    valueListeners.emplace(std::weak_ptr<ListenerToken::Impl>(token.token), std::move(lambda));
+    return token;
 }
 
 template <typename T>
@@ -469,8 +455,16 @@ void Fundamental<T>::DynamicValueSource::setValue(juce::var const& newVar)
 template <typename T>
 void Fundamental<T>::callListeners(T newValue)
 {
-    for (auto& listener : valueListeners)
-        (*listener)(*this, newValue);
+    std::erase_if(valueListeners, [] (auto const& p) { return p.first.expired(); });
+
+    for (auto& [token, listener] : valueListeners)
+    {
+        // we need to check if the token expired again, becaus other listeners may have caused it to be expired
+        if (token.expired())
+            continue;
+
+        listener(*this, newValue);
+    }
 
     if (Base::parent != nullptr)
     {
@@ -738,18 +732,11 @@ template <typename T>
 template <std::invocable<Object::Operation, Array<T> const&, T const&, std::size_t> Lambda>
 ListenerToken Array<T>::addListener(Lambda && lambda)
 {
-    // Add the listener to the vector
-    auto& listener = arrayListeners.emplace_back(std::make_unique<ArrayListenerFunction>(std::move(lambda)));
-    auto* listenerPtr = listener.get();
+    ListenerToken token(ListenerToken::private_constructor_t{});
 
-    // Return a token that removes this listener when destroyed
-    return ListenerToken([this, listenerPtr]()
-    {
-        auto it = std::find_if(arrayListeners.begin(), arrayListeners.end(),
-            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
-        if (it != arrayListeners.end())
-            arrayListeners.erase(it);
-    });
+    // Add the listener to the vector
+    arrayListeners.emplace(std::weak_ptr<ListenerToken::Impl>(token.token), std::move(lambda));
+    return token;
 }
 
 template <typename T>
@@ -885,8 +872,16 @@ void Array<T>::Element::init(Array& container_)
 template <typename T>
 void Array<T>::callListeners(Operation op, T const& newValue, std::size_t idx) const
 {
-    for (auto& listener : arrayListeners)
-        (*listener)(op, *this, newValue, idx);
+    std::erase_if(arrayListeners, [] (auto const& p) { return p.first.expired(); });
+
+    for (auto& [token, listener] : arrayListeners)
+    {
+        // we need to check if the token expired again, becaus other listeners may have caused it to be expired
+        if (token.expired())
+            continue;
+
+        listener(op, *this, newValue, idx);
+    }
 
     {
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
@@ -1052,18 +1047,11 @@ template <typename T>
 template <std::invocable<Object::Operation, Map<T> const&, T const&, std::string_view> Lambda>
 ListenerToken Map<T>::addListener(Lambda && lambda)
 {
-    // Add the listener to the vector
-    auto& listener = mapListeners.emplace_back(std::make_unique<MapListenerFunction>(std::move(lambda)));
-    auto* listenerPtr = listener.get();
+    ListenerToken token(ListenerToken::private_constructor_t{});
 
-    // Return a token that removes this listener when destroyed
-    return ListenerToken([this, listenerPtr]()
-    {
-        auto it = std::find_if(mapListeners.begin(), mapListeners.end(),
-            [listenerPtr](auto const& ptr) { return ptr.get() == listenerPtr; });
-        if (it != mapListeners.end())
-            mapListeners.erase(it);
-    });
+    // Add the listener to the vector
+    mapListeners.emplace(std::weak_ptr<ListenerToken::Impl>(token.token), std::move(lambda));
+    return token;
 }
 
 template <typename T>
@@ -1199,8 +1187,16 @@ void Map<T>::Element::init(Map& container_)
 template <typename T>
 void Map<T>::callListeners(Operation op, T const& newValue, std::string_view key) const
 {
-    for (auto& listener : mapListeners)
-        (*listener)(op, *this, newValue, key);
+    std::erase_if(mapListeners, [] (auto const& p) { return p.first.expired(); });
+
+    for (auto& [token, listener] : mapListeners)
+    {
+        // we need to check if the token expired again, becaus other listeners may have caused it to be expired
+        if (token.expired())
+            continue;
+
+        listener(op, *this, newValue, key);
+    }
 
     {
         std::conditional_t<Fundamental<T>::kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);

@@ -94,8 +94,16 @@ Object::Object(Object&& o) : Value(std::move(o)), childListeners(std::move(o.chi
 
 void Object::callChildListeners(ID const& id, Operation op, Object const& parentOfChangedValue, Value const& newValue) const
 {
-    for (auto& listener : childListeners)
-        (*listener)(id, op, parentOfChangedValue, newValue);
+    std::erase_if(childListeners, [] (auto const& p) { return p.first.expired(); });
+
+    for (auto& [token, listener] : childListeners)
+    {
+        // we need to check if the token expired again, becaus other listeners may have caused it to be expired
+        if (token.expired())
+            continue;
+
+        listener(id, op, parentOfChangedValue, newValue);
+    }
 
     if (parent != nullptr)
     {

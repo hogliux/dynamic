@@ -157,36 +157,14 @@ public:
     /// Default constructor - creates an empty token
     ListenerToken() = default;
 
-    /// Construct with a removal callback
-    explicit ListenerToken(std::function<void()> removeCallback_)
-        : removeCallback(std::move(removeCallback_)) {}
-
-    /// Destructor - removes the listener if this token owns one
-    ~ListenerToken()
-    {
-        if (removeCallback)
-            removeCallback();
-    }
+    // Default destructor
+    ~ListenerToken() = default;
 
     /// Move constructor
-    ListenerToken(ListenerToken&& other) noexcept
-        : removeCallback(std::move(other.removeCallback))
-    {
-        other.removeCallback = nullptr;
-    }
+    ListenerToken(ListenerToken&&) noexcept = default;
 
     /// Move assignment
-    ListenerToken& operator=(ListenerToken&& other) noexcept
-    {
-        if (this != &other)
-        {
-            if (removeCallback)
-                removeCallback();
-            removeCallback = std::move(other.removeCallback);
-            other.removeCallback = nullptr;
-        }
-        return *this;
-    }
+    ListenerToken& operator=(ListenerToken&&) noexcept = default;
 
     /// Deleted copy constructor
     ListenerToken(ListenerToken const&) = delete;
@@ -195,7 +173,17 @@ public:
     ListenerToken& operator=(ListenerToken const&) = delete;
 
 private:
-    std::function<void()> removeCallback;
+    template <typename> friend class Fundamental;
+    template <typename> friend class Array;
+    template <typename> friend class Map;
+    friend class Object;
+    
+    struct private_constructor_t {};
+
+    struct Impl {};
+
+    ListenerToken(private_constructor_t) : token(std::make_shared<Impl>()) {}
+    std::shared_ptr<Impl> token;
 };
 
 //=============================================================================
@@ -514,7 +502,7 @@ private:
 
     using ChildListenerFunction = std::function<void(ID const&, Operation, Object const&, Value const&)>;
 
-    mutable std::vector<std::unique_ptr<ChildListenerFunction>> childListeners;
+    mutable std::map<std::weak_ptr<ListenerToken::Impl>, ChildListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> childListeners;
     mutable std::vector<Value::ListenerBinding> managedChildListeners;
 };
 
@@ -672,7 +660,7 @@ protected:
     typename Value::ConstTypesVariant visit_helper() const override;
 
     T underlying;
-    mutable std::vector<std::unique_ptr<ValueListenerFunction>> valueListeners = {};
+    mutable std::map<std::weak_ptr<ListenerToken::Impl>, ValueListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> valueListeners = {};
     mutable std::vector<Value::ListenerBinding> managedValueListeners = {};
 private:
    #if JUCE_SUPPORT
@@ -1045,7 +1033,7 @@ private:
     void callListeners(Operation op, T const& newValue, std::size_t idx) const;
 
     std::vector<Element> elements;
-    mutable std::vector<std::unique_ptr<ArrayListenerFunction>> arrayListeners;
+    mutable std::map<std::weak_ptr<ListenerToken::Impl>, ArrayListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> arrayListeners;
     mutable std::vector<Value::ListenerBinding> managedArrayListeners;
 };
 
@@ -1241,7 +1229,7 @@ private:
     void callListeners(Operation op, T const& newValue, std::string_view key) const;
 
     std::vector<Element> elements;
-    mutable std::vector<std::unique_ptr<MapListenerFunction>> mapListeners;
+    mutable std::map<std::weak_ptr<ListenerToken::Impl>, MapListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> mapListeners;
     mutable std::vector<Value::ListenerBinding> managedMapListeners;
 };
 
