@@ -130,7 +130,7 @@ class MetaType;
  */
 struct FieldDescriptor
 {
-    std::string_view name;
+    std::string_view fieldname;
     MetaType const& (*metaType)();
 };
 
@@ -198,7 +198,7 @@ private:
  *   - Type identification via type() and isStruct()
  *   - Validity checking via isValid() and operator bool()
  *   - Type-safe visitation via visit() with lambda overloads
- *   - Field naming for struct members via name()
+ *   - Field naming for struct members via fieldname()
  *
  * Derived classes include:
  *   - Invalid: Sentinel for invalid/missing fields
@@ -240,7 +240,7 @@ public:
     virtual bool isValid() const = 0;
 
     /// Returns the field name if this value is a named field, empty otherwise
-    virtual std::string name() const { return {}; }
+    virtual std::string fieldname() const { return {}; }
 
     /// Converts to bool based on validity (same as isValid())
     operator bool() const { return isValid(); }
@@ -348,7 +348,7 @@ public:
  * @brief Abstract base class for struct types containing Field<> members
  *
  * Object extends Value to add struct-specific functionality:
- *   - Field iteration via type_erased_fields()
+ *   - Field iteration via typeErasedFields()
  *   - Runtime field access by name via operator()(string_view)
  *   - Hierarchical path-based field access via getchild()
  *   - Recursive child change listeners via addChildListener()
@@ -445,10 +445,10 @@ public:
    #endif
 
     /// Returns a vector of references to all fields (const version)
-    virtual std::vector<std::reference_wrapper<Value const>> type_erased_fields() const { assert(false); return {}; }
+    virtual std::vector<std::reference_wrapper<Value const>> typeErasedFields() const { assert(false); return {}; }
 
     /// Returns a vector of references to all fields (mutable version)
-    virtual std::vector<std::reference_wrapper<Value>> type_erased_fields() { assert(false); return {}; }
+    virtual std::vector<std::reference_wrapper<Value>> typeErasedFields() { assert(false); return {}; }
 
     /**
      * @brief Access a field by name at runtime
@@ -795,7 +795,7 @@ public:
     /**
      * @brief Returns a tuple of references to all typed fields
      *
-     * Unlike type_erased_fields(), this returns a tuple with the actual Field<> types,
+     * Unlike typeErasedFields(), this returns a tuple with the actual Field<> types,
      * allowing compile-time access to field types and names.
      *
      * @return Tuple of references to Field<> members
@@ -803,10 +803,10 @@ public:
     auto fields(this auto& self);
 
     /// Returns type-erased references to all fields (const version)
-    std::vector<std::reference_wrapper<Value const>> type_erased_fields() const override;
+    std::vector<std::reference_wrapper<Value const>> typeErasedFields() const override;
 
     /// Returns type-erased references to all fields (mutable version)
-    std::vector<std::reference_wrapper<Value>> type_erased_fields() override;
+    std::vector<std::reference_wrapper<Value>> typeErasedFields() override;
 
     /**
      * @brief Visit all fields with a lambda
@@ -836,7 +836,7 @@ public:
     bool removeChild(std::string const&) override;
 
 private:
-    auto type_erased_fields_internal(this auto& self);
+    auto typeErasedFields_internal(this auto& self);
 
     void init();
 };
@@ -854,7 +854,7 @@ namespace dynamic
  *
  * Array<T> provides a vector-like container where elements are automatically
  * wrapped in the reflection system. It extends Object to provide:
- *   - Element access via type_erased_fields()
+ *   - Element access via typeErasedFields()
  *   - Change listeners that fire on add/remove operations
  *   - Hierarchical change propagation to parent structs
  *   - Each element is indexed numerically and accessible by index as a field name
@@ -901,10 +901,10 @@ public:
     std::type_info const& elementType() const override { return typeid(T); }
 
     /// Returns a vector of type-erased references to all elements (const version)
-    std::vector<std::reference_wrapper<Value const>> type_erased_fields() const override;
+    std::vector<std::reference_wrapper<Value const>> typeErasedFields() const override;
 
     /// Returns a vector of type-erased references to all elements (mutable version)
-    std::vector<std::reference_wrapper<Value>> type_erased_fields() override;
+    std::vector<std::reference_wrapper<Value>> typeErasedFields() override;
 
     /// Returns the number of elements in the array
     std::size_t size() const { return elements.size(); }
@@ -984,7 +984,7 @@ public:
 
     friend bool operator==<>(Array<T> const&, Array<T> const&);
 private:
-    auto type_erased_fields_internal(this auto && self);
+    auto typeErasedFields_internal(this auto && self);
 
     /**
      * @brief Internal wrapper for array elements
@@ -1023,7 +1023,7 @@ private:
         Element& operator=(T && t);
 
         /// Returns the element's index as a string (its "field name")
-        std::string name() const override;
+        std::string fieldname() const override;
 
     private:
         /// Initialize the element's parent pointer
@@ -1115,7 +1115,7 @@ public:
  *
  * Map<T> provides a dictionary-like container where values are indexed by string
  * keys and automatically wrapped in the reflection system. It extends Object to provide:
- *   - Key-value access via type_erased_fields() (values accessible by key name)
+ *   - Key-value access via typeErasedFields() (values accessible by key name)
  *   - Change listeners that fire on add/remove operations
  *   - Hierarchical change propagation to parent structs
  *   - Each value is accessible as a field with its key as the field name
@@ -1160,10 +1160,10 @@ public:
     std::type_info const& elementType() const override { return typeid(T); }
 
     /// Returns a vector of type-erased references to all values (const version)
-    std::vector<std::reference_wrapper<Value const>> type_erased_fields() const override;
+    std::vector<std::reference_wrapper<Value const>> typeErasedFields() const override;
 
     /// Returns a vector of type-erased references to all values (mutable version)
-    std::vector<std::reference_wrapper<Value>> type_erased_fields() override;
+    std::vector<std::reference_wrapper<Value>> typeErasedFields() override;
 
     /// Returns the number of key-value pairs in the map
     std::size_t size() const { return elements.size(); }
@@ -1247,7 +1247,7 @@ public:
 
     friend bool operator==<>(Map<T> const&, Map<T> const&);
 private:
-    auto type_erased_fields_internal(this auto && self);
+    auto typeErasedFields_internal(this auto && self);
 
     /**
      * @brief Internal wrapper for map values
@@ -1286,7 +1286,7 @@ private:
         Element& operator=(T && t);
 
         /// Returns the element's key as its field name
-        std::string name() const override;
+        std::string fieldname() const override;
 
     private:
         friend bool operator==<>(Map<T> const&, Map<T> const&);
@@ -1394,7 +1394,7 @@ public:
  *
  * Field is the key building block for reflection-enabled structs. Each member
  * of a struct should be wrapped in Field<Type, "name"> to enable:
- *   - Compile-time field name access via name()
+ *   - Compile-time field name access via fieldname()
  *   - Integration with Record's field iteration
  *   - Listener support and change propagation to parent structs
  *
@@ -1432,7 +1432,7 @@ public:
     Field& operator=(T && t);
 
     /// Returns the compile-time field name as specified in the template parameter
-    std::string name() const override;
+    std::string fieldname() const override;
 };
 
 //=============================================================================

@@ -135,7 +135,7 @@ void metaTypeExamples()
     std::cout << "--- Record<Point> fields (no instance needed) ---\n";
     auto const& pointMeta = Record<Point>::meta();
     for (auto const& field : pointMeta.fields())
-        std::cout << "  " << field.name << " (opaque: " << field.metaType().isOpaque() << ")\n";
+        std::cout << "  " << field.fieldname << " (opaque: " << field.metaType().isOpaque() << ")\n";
 
     // 2. Inspect nested Record types recursively
     std::cout << "\n--- Record<Line> fields (nested introspection) ---\n";
@@ -143,13 +143,13 @@ void metaTypeExamples()
     for (auto const& field : lineMeta.fields())
     {
         auto const& fieldMeta = field.metaType();
-        std::cout << "  " << field.name;
+        std::cout << "  " << field.fieldname;
 
         if (fieldMeta.isRecord())
         {
             std::cout << " (record with fields:";
             for (auto const& nested : fieldMeta.fields())
-                std::cout << " " << nested.name;
+                std::cout << " " << nested.fieldname;
             std::cout << ")\n";
         }
         else
@@ -164,7 +164,7 @@ void metaTypeExamples()
     for (auto const& field : stateMeta.fields())
     {
         auto const& fieldMeta = field.metaType();
-        std::cout << "  " << field.name;
+        std::cout << "  " << field.fieldname;
 
         if (fieldMeta.isRecord())
             std::cout << " [record, " << fieldMeta.fields().size() << " fields]";
@@ -193,7 +193,7 @@ void metaTypeExamples()
     auto const& runtimeMeta = lineField.metaType();
     std::cout << "  state.line has " << runtimeMeta.fields().size() << " fields:";
     for (auto const& field : runtimeMeta.fields())
-        std::cout << " " << field.name;
+        std::cout << " " << field.fieldname;
     std::cout << "\n";
 
     // 6. Use metaTypeOf<T>() free function

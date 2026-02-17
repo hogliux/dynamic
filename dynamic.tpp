@@ -171,8 +171,8 @@ auto Object::operator()(this auto&& self, std::string_view fldname)
                           Value const&,
                           Value&>
 {
-    auto flds = self.type_erased_fields();
-    auto it = std::find_if(flds.begin(), flds.end(), [&fldname] (auto const& fld) { return fld.get().name() == fldname; });
+    auto flds = self.typeErasedFields();
+    auto it = std::find_if(flds.begin(), flds.end(), [&fldname] (auto const& fld) { return fld.get().fieldname() == fldname; });
 
     if (it == flds.end()) // no field with this name?
         return Value::kInvalid;
@@ -469,7 +469,7 @@ void Fundamental<T>::callListeners(T newValue)
     if (Base::parent != nullptr)
     {
         std::conditional_t<kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
-        Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->name())), Object::Operation::modify, *Base::parent, newValueTypeErased);
+        Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->fieldname())), Object::Operation::modify, *Base::parent, newValueTypeErased);
     }
 
 #if JUCE_SUPPORT
@@ -583,15 +583,15 @@ auto Record<T>::fields(this auto& self)
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value const>> Record<T>::type_erased_fields() const
+std::vector<std::reference_wrapper<Value const>> Record<T>::typeErasedFields() const
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value>> Record<T>::type_erased_fields()
+std::vector<std::reference_wrapper<Value>> Record<T>::typeErasedFields()
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
@@ -600,7 +600,7 @@ void Record<T>::visitFields(this auto& self, Lambda && lambda) noexcept
 {
     std::apply([lambda_ = std::move(lambda)] <typename... Types> (Types &&... fields)
     {
-        (lambda_(fields.name(), fields), ...);
+        (lambda_(fields.fieldname(), fields), ...);
     }, self.fields());
 }
 
@@ -621,7 +621,7 @@ auto Record<T>::visitField(this auto& self, std::string_view const& str, Lambda 
     {
         (std::invoke([&lambda_, &str, &returnValue] (auto& fld)
         {
-            if ((! returnValue) && fld.name() == str)
+            if ((! returnValue) && fld.fieldname() == str)
             {
                 if constexpr (kLambdaReturnsVoid)
                 {
@@ -640,7 +640,7 @@ auto Record<T>::visitField(this auto& self, std::string_view const& str, Lambda 
 }
 
 template <typename T>
-auto Record<T>::type_erased_fields_internal(this auto& self)
+auto Record<T>::typeErasedFields_internal(this auto& self)
 {
     static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
     using ElementType = std::conditional_t<kIsConst, Value const, Value>;
@@ -695,15 +695,15 @@ Array<T>::Array(Array const& o) : Object(o), elements()
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value const>> Array<T>::type_erased_fields() const
+std::vector<std::reference_wrapper<Value const>> Array<T>::typeErasedFields() const
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value>> Array<T>::type_erased_fields()
+std::vector<std::reference_wrapper<Value>> Array<T>::typeErasedFields()
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
@@ -798,7 +798,7 @@ void Array<T>::addListener(ComponentType* context, Lambda && lambda) requires st
 #endif
 
 template <typename T>
-auto Array<T>::type_erased_fields_internal(this auto && self)
+auto Array<T>::typeErasedFields_internal(this auto && self)
 {
     static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
     using ElementType = std::conditional_t<kIsConst, Value const, Value>;
@@ -857,7 +857,7 @@ typename Array<T>::Element& Array<T>::Element::operator=(T && t)
 }
 
 template <typename T>
-std::string Array<T>::Element::name() const
+std::string Array<T>::Element::fieldname() const
 {
     auto const idx = this - static_cast<Array*>(Base::parent)->elements.data();
     return std::to_string(idx);
@@ -993,15 +993,15 @@ Map<T>::Map(Map const& o) : Object(o), elements()
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value const>> Map<T>::type_erased_fields() const
+std::vector<std::reference_wrapper<Value const>> Map<T>::typeErasedFields() const
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
-std::vector<std::reference_wrapper<Value>> Map<T>::type_erased_fields()
+std::vector<std::reference_wrapper<Value>> Map<T>::typeErasedFields()
 {
-    return type_erased_fields_internal();
+    return typeErasedFields_internal();
 }
 
 template <typename T>
@@ -1113,7 +1113,7 @@ void Map<T>::addListener(ComponentType* context, Lambda && lambda) requires std:
 #endif
 
 template <typename T>
-auto Map<T>::type_erased_fields_internal(this auto && self)
+auto Map<T>::typeErasedFields_internal(this auto && self)
 {
     static constexpr auto kIsConst = std::is_const_v<std::remove_reference_t<decltype(self)>>;
     using ElementType = std::conditional_t<kIsConst, Value const, Value>;
@@ -1173,7 +1173,7 @@ typename Map<T>::Element& Map<T>::Element::operator=(T && t)
 }
 
 template <typename T>
-std::string Map<T>::Element::name() const
+std::string Map<T>::Element::fieldname() const
 {
     return fieldName;
 }
@@ -1294,7 +1294,7 @@ Field<T, Name>& Field<T, Name>::operator=(T && t)
 }
 
 template <typename T, fixstr::fixed_string Name>
-std::string Field<T, Name>::name() const
+std::string Field<T, Name>::fieldname() const
 {
     return std::string(std::string_view(Name));
 }
@@ -1526,14 +1526,14 @@ inline std::ostream& operator<<(std::ostream& o, Object const& x)
 {
     o << "{ ";
     auto first = true;
-    auto const& fields = x.type_erased_fields();
+    auto const& fields = x.typeErasedFields();
 
     for (auto const& fld : fields)
     {
         if (! std::exchange(first, false))
             o << ", ";
 
-        o << "." << fld.get().name() << " = " << fld.get();
+        o << "." << fld.get().fieldname() << " = " << fld.get();
     }
 
     o << " }";

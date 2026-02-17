@@ -399,15 +399,15 @@ TEST_CASE("kFieldNames") {
     CHECK(Record<Point>::kFieldNames[1] == "y");
 }
 
-TEST_CASE("type_erased_fields") {
+TEST_CASE("typeErasedFields") {
     Record<Point> point;
     point("x"_fld) = 1.0f;
     point("y"_fld) = 2.0f;
 
-    auto fields = static_cast<Object&>(point).type_erased_fields();
+    auto fields = static_cast<Object&>(point).typeErasedFields();
     CHECK(fields.size() == 2);
-    CHECK(fields[0].get().name() == "x");
-    CHECK(fields[1].get().name() == "y");
+    CHECK(fields[0].get().fieldname() == "x");
+    CHECK(fields[1].get().fieldname() == "y");
 }
 
 TEST_CASE("visitFields") {
@@ -863,7 +863,7 @@ TEST_CASE("runtime operator() field access") {
 
     Value& x = static_cast<Object&>(point)("x");
     CHECK(x.isValid());
-    CHECK(x.name() == "x");
+    CHECK(x.fieldname() == "x");
 }
 
 TEST_CASE("const getchild") {
@@ -914,15 +914,15 @@ TEST_CASE("access elements by index") {
     CHECK(elem1.isValid());
 }
 
-TEST_CASE("type_erased_fields") {
+TEST_CASE("typeErasedFields") {
     Array<int32_t> arr;
     arr.addElement(100);
     arr.addElement(200);
 
-    auto fields = static_cast<Object&>(arr).type_erased_fields();
+    auto fields = static_cast<Object&>(arr).typeErasedFields();
     CHECK(fields.size() == 2);
-    CHECK(fields[0].get().name() == "0");
-    CHECK(fields[1].get().name() == "1");
+    CHECK(fields[0].get().fieldname() == "0");
+    CHECK(fields[1].get().fieldname() == "1");
 }
 
 TEST_CASE("removeElement") {
@@ -1111,15 +1111,15 @@ TEST_CASE("access elements by key") {
 
     Value& elem = static_cast<Object&>(map)("greeting");
     CHECK(elem.isValid());
-    CHECK(elem.name() == "greeting");
+    CHECK(elem.fieldname() == "greeting");
 }
 
-TEST_CASE("type_erased_fields") {
+TEST_CASE("typeErasedFields") {
     Map<int32_t> map;
     map.addElement("a", 1);
     map.addElement("b", 2);
 
-    auto fields = static_cast<Object&>(map).type_erased_fields();
+    auto fields = static_cast<Object&>(map).typeErasedFields();
     CHECK(fields.size() == 2);
 }
 
@@ -1351,8 +1351,8 @@ TEST_CASE("record type meta") {
 
     auto fields = meta.fields();
     CHECK(fields.size() == 2);
-    CHECK(fields[0].name == "x");
-    CHECK(fields[1].name == "y");
+    CHECK(fields[0].fieldname == "x");
+    CHECK(fields[1].fieldname == "y");
     CHECK(fields[0].metaType().isOpaque());
     CHECK(fields[0].metaType().typeInfo() == typeid(float));
 }
@@ -1362,8 +1362,8 @@ TEST_CASE("nested record meta") {
     CHECK(meta.isRecord());
     auto fields = meta.fields();
     CHECK(fields.size() == 2);
-    CHECK(fields[0].name == "start");
-    CHECK(fields[1].name == "finish");
+    CHECK(fields[0].fieldname == "start");
+    CHECK(fields[1].fieldname == "finish");
 
     // Nested field types should be records
     auto const& startMeta = fields[0].metaType();
@@ -1474,8 +1474,8 @@ TEST_SUITE("Field") {
 
 TEST_CASE("field name") {
     Record<Point> point;
-    CHECK(point("x"_fld).name() == "x");
-    CHECK(point("y"_fld).name() == "y");
+    CHECK(point("x"_fld).fieldname() == "x");
+    CHECK(point("y"_fld).fieldname() == "y");
 }
 
 TEST_CASE("field assignment") {
@@ -1947,7 +1947,7 @@ TEST_CASE("range-for loop with primitive type") {
     std::vector<std::string> keys;
     std::vector<int32_t> values;
     for (auto const& elem : map) {
-        keys.push_back(elem.name());
+        keys.push_back(elem.fieldname());
         values.push_back(static_cast<int32_t>(elem));
     }
     CHECK(keys.size() == 3);
@@ -2086,7 +2086,7 @@ TEST_CASE("iterator name() returns key") {
     map.addElement("mykey", 10);
 
     auto it = map.begin();
-    CHECK(it->name() == "mykey");
+    CHECK(it->fieldname() == "mykey");
 }
 
 TEST_CASE("contains after remove") {

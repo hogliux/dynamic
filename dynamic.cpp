@@ -108,7 +108,7 @@ void Object::callChildListeners(ID const& id, Operation op, Object const& parent
     if (parent != nullptr)
     {
         auto newID = id;
-        newID.insert(newID.begin(), std::string(this->name()));
+        newID.insert(newID.begin(), std::string(this->fieldname()));
         parent->callChildListeners(newID, op, parentOfChangedValue, newValue);
     }
 }
