@@ -1043,14 +1043,14 @@ public:
     using ElementType = typename Element::Base;
 
     /// Typed element access by index
-    ElementType& operator()(std::size_t idx)
+    ElementType& operator[](std::size_t idx)
     {
         assert(idx < elements.size());
         return elements[idx];
     }
 
     /// Typed element access by index (const)
-    ElementType const& operator()(std::size_t idx) const
+    ElementType const& operator[](std::size_t idx) const
     {
         assert(idx < elements.size());
         return elements[idx];
@@ -1310,7 +1310,7 @@ public:
     using ElementType = typename Element::Base;
 
     /// Typed element access by key (asserts if key not found)
-    ElementType& operator()(std::string_view key)
+    ElementType& operator[](std::string_view key)
     {
         auto it = std::find_if(elements.begin(), elements.end(),
             [key](Element const& elem) { return elem.fieldName == key; });
@@ -1319,13 +1319,22 @@ public:
     }
 
     /// Typed element access by key (const, asserts if key not found)
-    ElementType const& operator()(std::string_view key) const
+    ElementType const& operator[](std::string_view key) const
     {
         auto it = std::find_if(elements.begin(), elements.end(),
             [key](Element const& elem) { return elem.fieldName == key; });
         assert(it != elements.end());
         return *it;
     }
+
+    // Required to fix ambiguity with built-in operator[]
+    template<typename U>
+    requires std::is_convertible_v<U, std::string_view>
+    ElementType& operator[](U&& key) { return (*this)[std::string_view(std::forward<U>(key))]; }
+
+    template<typename U>
+    requires std::is_convertible_v<U, std::string_view>
+    ElementType const& operator[](U&& key) const { return (*this)[std::string_view(std::forward<U>(key))]; }
 
     /// Returns true if the map has no elements
     bool empty() const { return elements.empty(); }

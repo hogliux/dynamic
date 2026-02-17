@@ -1673,54 +1673,54 @@ TEST_CASE("default constructed token does nothing on destruction") {
 
 TEST_SUITE("Array typed access") {
 
-TEST_CASE("operator() for primitive type") {
+TEST_CASE("operator[] for primitive type") {
     Array<int32_t> arr;
     arr.addElement(10);
     arr.addElement(20);
     arr.addElement(30);
 
-    CHECK(arr(0)() == 10);
-    CHECK(arr(1)() == 20);
-    CHECK(arr(2)() == 30);
+    CHECK(arr[0]() == 10);
+    CHECK(arr[1]() == 20);
+    CHECK(arr[2]() == 30);
 }
 
-TEST_CASE("operator() for struct type") {
+TEST_CASE("operator[] for struct type") {
     Array<Point> arr;
     Point p1; p1.x = 1.0f; p1.y = 2.0f;
     Point p2; p2.x = 3.0f; p2.y = 4.0f;
     arr.addElement(p1);
     arr.addElement(p2);
 
-    CHECK(arr(0)("x"_fld)() == doctest::Approx(1.0f));
-    CHECK(arr(0)("y"_fld)() == doctest::Approx(2.0f));
-    CHECK(arr(1)("x"_fld)() == doctest::Approx(3.0f));
-    CHECK(arr(1)("y"_fld)() == doctest::Approx(4.0f));
+    CHECK(arr[0]("x"_fld)() == doctest::Approx(1.0f));
+    CHECK(arr[0]("y"_fld)() == doctest::Approx(2.0f));
+    CHECK(arr[1]("x"_fld)() == doctest::Approx(3.0f));
+    CHECK(arr[1]("y"_fld)() == doctest::Approx(4.0f));
 }
 
-TEST_CASE("operator() mutation") {
+TEST_CASE("operator[] mutation") {
     Array<int32_t> arr;
     arr.addElement(10);
-    arr(0) = 99;
-    CHECK(arr(0)() == 99);
+    arr[0] = 99;
+    CHECK(arr[0]() == 99);
 }
 
-TEST_CASE("operator() mutation on struct") {
+TEST_CASE("operator[] mutation on struct") {
     Array<Point> arr;
     Point p; p.x = 0.0f; p.y = 0.0f;
     arr.addElement(p);
 
-    arr(0)("x"_fld) = 42.0f;
-    CHECK(arr(0)("x"_fld)() == doctest::Approx(42.0f));
+    arr[0]("x"_fld) = 42.0f;
+    CHECK(arr[0]("x"_fld)() == doctest::Approx(42.0f));
 }
 
-TEST_CASE("const operator()") {
+TEST_CASE("const operator[]") {
     Array<int32_t> arr;
     arr.addElement(10);
     arr.addElement(20);
 
     Array<int32_t> const& constArr = arr;
-    CHECK(constArr(0)() == 10);
-    CHECK(constArr(1)() == 20);
+    CHECK(constArr[0]() == 10);
+    CHECK(constArr[1]() == 20);
 }
 
 TEST_CASE("empty") {
@@ -1772,9 +1772,9 @@ TEST_CASE("mutable range-for loop") {
         elem = elem() * 10;
     }
 
-    CHECK(arr(0)() == 10);
-    CHECK(arr(1)() == 20);
-    CHECK(arr(2)() == 30);
+    CHECK(arr[0]() == 10);
+    CHECK(arr[1]() == 20);
+    CHECK(arr[2]() == 30);
 }
 
 TEST_CASE("const range-for loop") {
@@ -1869,7 +1869,7 @@ TEST_CASE("operator() triggers listeners") {
             childCallCount++;
         });
 
-    arr(0)("x"_fld) = 5.0f;
+    arr[0]("x"_fld) = 5.0f;
     CHECK(childCallCount == 1);
 }
 
@@ -1886,41 +1886,41 @@ TEST_CASE("operator() for primitive type") {
     map.addElement("a", 10);
     map.addElement("b", 20);
 
-    CHECK(map("a")() == 10);
-    CHECK(map("b")() == 20);
+    CHECK(map["a"]() == 10);
+    CHECK(map["b"]() == 20);
 }
 
-TEST_CASE("operator() for struct type") {
+TEST_CASE("operator[] for struct type") {
     Map<Point> map;
     Point p; p.x = 1.0f; p.y = 2.0f;
     map.addElement("origin", p);
 
-    CHECK(map("origin")("x"_fld)() == doctest::Approx(1.0f));
-    CHECK(map("origin")("y"_fld)() == doctest::Approx(2.0f));
+    CHECK(map["origin"]("x"_fld)() == doctest::Approx(1.0f));
+    CHECK(map["origin"]("y"_fld)() == doctest::Approx(2.0f));
 }
 
-TEST_CASE("operator() mutation") {
+TEST_CASE("operator[] mutation") {
     Map<int32_t> map;
     map.addElement("key", 10);
-    map("key") = 99;
-    CHECK(map("key")() == 99);
+    map["key"] = 99;
+    CHECK(map["key"]() == 99);
 }
 
-TEST_CASE("operator() mutation on struct") {
+TEST_CASE("operator[] mutation on struct") {
     Map<Point> map;
     Point p; p.x = 0.0f; p.y = 0.0f;
     map.addElement("pt", p);
 
-    map("pt")("x"_fld) = 42.0f;
-    CHECK(map("pt")("x"_fld)() == doctest::Approx(42.0f));
+    map["pt"]("x"_fld) = 42.0f;
+    CHECK(map["pt"]("x"_fld)() == doctest::Approx(42.0f));
 }
 
-TEST_CASE("const operator()") {
+TEST_CASE("const operator[]") {
     Map<int32_t> map;
     map.addElement("x", 10);
 
     Map<int32_t> const& constMap = map;
-    CHECK(constMap("x")() == 10);
+    CHECK(constMap["x"]() == 10);
 }
 
 TEST_CASE("empty") {
@@ -1985,8 +1985,8 @@ TEST_CASE("mutable range-for loop") {
         elem = val * 10;
     }
 
-    CHECK(map("a")() == 10);
-    CHECK(map("b")() == 20);
+    CHECK(map["a"]() == 10);
+    CHECK(map["b"]() == 20);
 }
 
 TEST_CASE("const range-for loop") {
@@ -2056,7 +2056,7 @@ TEST_CASE("cbegin/cend") {
     CHECK(it == map.cend());
 }
 
-TEST_CASE("operator() triggers listeners") {
+TEST_CASE("operator[] triggers listeners") {
     Map<Point> map;
     Point p; p.x = 0.0f; p.y = 0.0f;
     map.addElement("pt", p);
@@ -2067,7 +2067,7 @@ TEST_CASE("operator() triggers listeners") {
             childCallCount++;
         });
 
-    map("pt")("x"_fld) = 5.0f;
+    map["pt"]("x"_fld) = 5.0f;
     CHECK(childCallCount == 1);
 }
 
@@ -2078,7 +2078,7 @@ TEST_CASE("find and modify") {
     auto it = map.find("key");
     CHECK(it != map.end());
     *it = 42;
-    CHECK(map("key")() == 42);
+    CHECK(map["key"]() == 42);
 }
 
 TEST_CASE("iterator name() returns key") {
