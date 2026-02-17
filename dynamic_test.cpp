@@ -1666,3 +1666,435 @@ TEST_CASE("default constructed token does nothing on destruction") {
 // }
 
 } // TEST_SUITE("ListenerToken")
+
+//=============================================================================
+// Array typed access and iterator tests
+//=============================================================================
+
+TEST_SUITE("Array typed access") {
+
+TEST_CASE("operator() for primitive type") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr.addElement(20);
+    arr.addElement(30);
+
+    CHECK(arr(0)() == 10);
+    CHECK(arr(1)() == 20);
+    CHECK(arr(2)() == 30);
+}
+
+TEST_CASE("operator() for struct type") {
+    Array<Point> arr;
+    Point p1; p1.x = 1.0f; p1.y = 2.0f;
+    Point p2; p2.x = 3.0f; p2.y = 4.0f;
+    arr.addElement(p1);
+    arr.addElement(p2);
+
+    CHECK(arr(0)("x"_fld)() == doctest::Approx(1.0f));
+    CHECK(arr(0)("y"_fld)() == doctest::Approx(2.0f));
+    CHECK(arr(1)("x"_fld)() == doctest::Approx(3.0f));
+    CHECK(arr(1)("y"_fld)() == doctest::Approx(4.0f));
+}
+
+TEST_CASE("operator() mutation") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr(0) = 99;
+    CHECK(arr(0)() == 99);
+}
+
+TEST_CASE("operator() mutation on struct") {
+    Array<Point> arr;
+    Point p; p.x = 0.0f; p.y = 0.0f;
+    arr.addElement(p);
+
+    arr(0)("x"_fld) = 42.0f;
+    CHECK(arr(0)("x"_fld)() == doctest::Approx(42.0f));
+}
+
+TEST_CASE("const operator()") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr.addElement(20);
+
+    Array<int32_t> const& constArr = arr;
+    CHECK(constArr(0)() == 10);
+    CHECK(constArr(1)() == 20);
+}
+
+TEST_CASE("empty") {
+    Array<int32_t> arr;
+    CHECK(arr.empty());
+    arr.addElement(1);
+    CHECK_FALSE(arr.empty());
+}
+
+TEST_CASE("range-for loop with primitive type") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr.addElement(20);
+    arr.addElement(30);
+
+    std::vector<int32_t> values;
+    for (auto const& elem : arr) {
+        values.push_back(elem());
+    }
+    CHECK(values.size() == 3);
+    CHECK(values[0] == 10);
+    CHECK(values[1] == 20);
+    CHECK(values[2] == 30);
+}
+
+TEST_CASE("range-for loop with struct type") {
+    Array<Point> arr;
+    Point p1; p1.x = 1.0f; p1.y = 2.0f;
+    Point p2; p2.x = 3.0f; p2.y = 4.0f;
+    arr.addElement(p1);
+    arr.addElement(p2);
+
+    std::vector<float> xValues;
+    for (auto const& elem : arr) {
+        xValues.push_back(elem("x"_fld)());
+    }
+    CHECK(xValues.size() == 2);
+    CHECK(xValues[0] == doctest::Approx(1.0f));
+    CHECK(xValues[1] == doctest::Approx(3.0f));
+}
+
+TEST_CASE("mutable range-for loop") {
+    Array<int32_t> arr;
+    arr.addElement(1);
+    arr.addElement(2);
+    arr.addElement(3);
+
+    for (auto& elem : arr) {
+        elem = elem() * 10;
+    }
+
+    CHECK(arr(0)() == 10);
+    CHECK(arr(1)() == 20);
+    CHECK(arr(2)() == 30);
+}
+
+TEST_CASE("const range-for loop") {
+    Array<int32_t> arr;
+    arr.addElement(5);
+    arr.addElement(10);
+
+    Array<int32_t> const& constArr = arr;
+    int32_t sum = 0;
+    for (auto const& elem : constArr) {
+        sum += elem();
+    }
+    CHECK(sum == 15);
+}
+
+TEST_CASE("iterator arithmetic") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr.addElement(20);
+    arr.addElement(30);
+
+    auto it = arr.begin();
+    CHECK((*it)() == 10);
+    ++it;
+    CHECK((*it)() == 20);
+    --it;
+    CHECK((*it)() == 10);
+
+    auto it2 = it + 2;
+    CHECK((*it2)() == 30);
+    CHECK(it2 - it == 2);
+
+    CHECK(it < it2);
+    CHECK(it2 > it);
+    CHECK(it <= it);
+    CHECK(it >= it);
+}
+
+TEST_CASE("iterator operator[]") {
+    Array<int32_t> arr;
+    arr.addElement(10);
+    arr.addElement(20);
+    arr.addElement(30);
+
+    auto it = arr.begin();
+    CHECK(it[0]() == 10);
+    CHECK(it[1]() == 20);
+    CHECK(it[2]() == 30);
+}
+
+TEST_CASE("cbegin/cend") {
+    Array<int32_t> arr;
+    arr.addElement(1);
+    arr.addElement(2);
+
+    auto it = arr.cbegin();
+    CHECK((*it)() == 1);
+    ++it;
+    CHECK((*it)() == 2);
+    ++it;
+    CHECK(it == arr.cend());
+}
+
+TEST_CASE("empty array iteration") {
+    Array<int32_t> arr;
+    CHECK(arr.begin() == arr.end());
+    int count = 0;
+    for (auto const& elem : arr) {
+        (void)elem;
+        count++;
+    }
+    CHECK(count == 0);
+}
+
+TEST_CASE("iterator with std::distance") {
+    Array<int32_t> arr;
+    arr.addElement(1);
+    arr.addElement(2);
+    arr.addElement(3);
+
+    CHECK(std::distance(arr.begin(), arr.end()) == 3);
+}
+
+TEST_CASE("operator() triggers listeners") {
+    Array<Point> arr;
+    Point p; p.x = 0.0f; p.y = 0.0f;
+    arr.addElement(p);
+
+    int childCallCount = 0;
+    auto token = static_cast<Object&>(arr).addChildListener(
+        [&childCallCount](ID const&, Object::Operation, Object const&, Value const&) {
+            childCallCount++;
+        });
+
+    arr(0)("x"_fld) = 5.0f;
+    CHECK(childCallCount == 1);
+}
+
+} // TEST_SUITE("Array typed access")
+
+//=============================================================================
+// Map typed access and iterator tests
+//=============================================================================
+
+TEST_SUITE("Map typed access") {
+
+TEST_CASE("operator() for primitive type") {
+    Map<int32_t> map;
+    map.addElement("a", 10);
+    map.addElement("b", 20);
+
+    CHECK(map("a")() == 10);
+    CHECK(map("b")() == 20);
+}
+
+TEST_CASE("operator() for struct type") {
+    Map<Point> map;
+    Point p; p.x = 1.0f; p.y = 2.0f;
+    map.addElement("origin", p);
+
+    CHECK(map("origin")("x"_fld)() == doctest::Approx(1.0f));
+    CHECK(map("origin")("y"_fld)() == doctest::Approx(2.0f));
+}
+
+TEST_CASE("operator() mutation") {
+    Map<int32_t> map;
+    map.addElement("key", 10);
+    map("key") = 99;
+    CHECK(map("key")() == 99);
+}
+
+TEST_CASE("operator() mutation on struct") {
+    Map<Point> map;
+    Point p; p.x = 0.0f; p.y = 0.0f;
+    map.addElement("pt", p);
+
+    map("pt")("x"_fld) = 42.0f;
+    CHECK(map("pt")("x"_fld)() == doctest::Approx(42.0f));
+}
+
+TEST_CASE("const operator()") {
+    Map<int32_t> map;
+    map.addElement("x", 10);
+
+    Map<int32_t> const& constMap = map;
+    CHECK(constMap("x")() == 10);
+}
+
+TEST_CASE("empty") {
+    Map<int32_t> map;
+    CHECK(map.empty());
+    map.addElement("a", 1);
+    CHECK_FALSE(map.empty());
+}
+
+TEST_CASE("contains") {
+    Map<int32_t> map;
+    CHECK_FALSE(map.contains("a"));
+    map.addElement("a", 1);
+    CHECK(map.contains("a"));
+    CHECK_FALSE(map.contains("b"));
+}
+
+TEST_CASE("range-for loop with primitive type") {
+    Map<int32_t> map;
+    map.addElement("a", 10);
+    map.addElement("b", 20);
+    map.addElement("c", 30);
+
+    std::vector<std::string> keys;
+    std::vector<int32_t> values;
+    for (auto const& elem : map) {
+        keys.push_back(elem.name());
+        values.push_back(static_cast<int32_t>(elem));
+    }
+    CHECK(keys.size() == 3);
+    CHECK(keys[0] == "a");
+    CHECK(keys[1] == "b");
+    CHECK(keys[2] == "c");
+    CHECK(values[0] == 10);
+    CHECK(values[1] == 20);
+    CHECK(values[2] == 30);
+}
+
+TEST_CASE("range-for loop with struct type") {
+    Map<Point> map;
+    Point p1; p1.x = 1.0f; p1.y = 2.0f;
+    Point p2; p2.x = 3.0f; p2.y = 4.0f;
+    map.addElement("first", p1);
+    map.addElement("second", p2);
+
+    std::vector<float> xValues;
+    for (auto const& elem : map) {
+        xValues.push_back(elem("x"_fld)());
+    }
+    CHECK(xValues.size() == 2);
+    CHECK(xValues[0] == doctest::Approx(1.0f));
+    CHECK(xValues[1] == doctest::Approx(3.0f));
+}
+
+TEST_CASE("mutable range-for loop") {
+    Map<int32_t> map;
+    map.addElement("a", 1);
+    map.addElement("b", 2);
+
+    for (auto& elem : map) {
+        auto val = elem();
+        elem = val * 10;
+    }
+
+    CHECK(map("a")() == 10);
+    CHECK(map("b")() == 20);
+}
+
+TEST_CASE("const range-for loop") {
+    Map<int32_t> map;
+    map.addElement("x", 5);
+    map.addElement("y", 10);
+
+    Map<int32_t> const& constMap = map;
+    int32_t sum = 0;
+    for (auto const& elem : constMap) {
+        sum += elem();
+    }
+    CHECK(sum == 15);
+}
+
+TEST_CASE("find existing key") {
+    Map<int32_t> map;
+    map.addElement("hello", 42);
+
+    auto it = map.find("hello");
+    CHECK(it != map.end());
+    CHECK((*it)() == 42);
+}
+
+TEST_CASE("find nonexistent key") {
+    Map<int32_t> map;
+    map.addElement("hello", 42);
+
+    auto it = map.find("missing");
+    CHECK(it == map.end());
+}
+
+TEST_CASE("const find") {
+    Map<int32_t> map;
+    map.addElement("key", 99);
+
+    Map<int32_t> const& constMap = map;
+    auto it = constMap.find("key");
+    CHECK(it != constMap.end());
+    CHECK((*it)() == 99);
+
+    auto it2 = constMap.find("nope");
+    CHECK(it2 == constMap.end());
+}
+
+TEST_CASE("empty map iteration") {
+    Map<int32_t> map;
+    CHECK(map.begin() == map.end());
+    int count = 0;
+    for (auto const& elem : map) {
+        (void)elem;
+        count++;
+    }
+    CHECK(count == 0);
+}
+
+TEST_CASE("cbegin/cend") {
+    Map<int32_t> map;
+    map.addElement("a", 1);
+    map.addElement("b", 2);
+
+    auto it = map.cbegin();
+    CHECK((*it)() == 1);
+    ++it;
+    CHECK((*it)() == 2);
+    ++it;
+    CHECK(it == map.cend());
+}
+
+TEST_CASE("operator() triggers listeners") {
+    Map<Point> map;
+    Point p; p.x = 0.0f; p.y = 0.0f;
+    map.addElement("pt", p);
+
+    int childCallCount = 0;
+    auto token = static_cast<Object&>(map).addChildListener(
+        [&childCallCount](ID const&, Object::Operation, Object const&, Value const&) {
+            childCallCount++;
+        });
+
+    map("pt")("x"_fld) = 5.0f;
+    CHECK(childCallCount == 1);
+}
+
+TEST_CASE("find and modify") {
+    Map<int32_t> map;
+    map.addElement("key", 10);
+
+    auto it = map.find("key");
+    CHECK(it != map.end());
+    *it = 42;
+    CHECK(map("key")() == 42);
+}
+
+TEST_CASE("iterator name() returns key") {
+    Map<int32_t> map;
+    map.addElement("mykey", 10);
+
+    auto it = map.begin();
+    CHECK(it->name() == "mykey");
+}
+
+TEST_CASE("contains after remove") {
+    Map<int32_t> map;
+    map.addElement("a", 1);
+    CHECK(map.contains("a"));
+    map.removeElement("a");
+    CHECK_FALSE(map.contains("a"));
+}
+
+} // TEST_SUITE("Map typed access")

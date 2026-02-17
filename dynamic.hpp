@@ -877,6 +877,8 @@ template <typename T>
 class Array : public Object
 {
 public:
+    using Object::operator();
+
     Array() = default;
     Array(Array const& o);
 
@@ -1035,6 +1037,77 @@ private:
     std::vector<Element> elements;
     mutable std::map<std::weak_ptr<ListenerToken::Impl>, ArrayListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> arrayListeners;
     mutable std::vector<Value::ListenerBinding> managedArrayListeners;
+
+public:
+    /// The typed element type (Fundamental<T> for primitive T, Record<T> for struct T)
+    using ElementType = typename Element::Base;
+
+    /// Typed element access by index
+    ElementType& operator()(std::size_t idx)
+    {
+        assert(idx < elements.size());
+        return elements[idx];
+    }
+
+    /// Typed element access by index (const)
+    ElementType const& operator()(std::size_t idx) const
+    {
+        assert(idx < elements.size());
+        return elements[idx];
+    }
+
+    /// Returns true if the array has no elements
+    bool empty() const { return elements.empty(); }
+
+    /// Iterator for typed element access
+    template <bool IsConst>
+    class IteratorImpl
+    {
+        friend class Array;
+        using VecIter = std::conditional_t<IsConst,
+            typename std::vector<Element>::const_iterator,
+            typename std::vector<Element>::iterator>;
+        VecIter it_;
+        explicit IteratorImpl(VecIter it) : it_(it) {}
+    public:
+        using iterator_category = std::random_access_iterator_tag;
+        using value_type = std::conditional_t<IsConst, ElementType const, ElementType>;
+        using difference_type = std::ptrdiff_t;
+        using pointer = value_type*;
+        using reference = value_type&;
+
+        reference operator*() const { return *it_; }
+        pointer operator->() const { return static_cast<pointer>(&(*it_)); }
+
+        IteratorImpl& operator++() { ++it_; return *this; }
+        IteratorImpl operator++(int) { auto tmp = *this; ++it_; return tmp; }
+        IteratorImpl& operator--() { --it_; return *this; }
+        IteratorImpl operator--(int) { auto tmp = *this; --it_; return tmp; }
+
+        IteratorImpl operator+(difference_type n) const { return IteratorImpl(it_ + n); }
+        IteratorImpl operator-(difference_type n) const { return IteratorImpl(it_ - n); }
+        difference_type operator-(IteratorImpl const& o) const { return it_ - o.it_; }
+        IteratorImpl& operator+=(difference_type n) { it_ += n; return *this; }
+        IteratorImpl& operator-=(difference_type n) { it_ -= n; return *this; }
+        reference operator[](difference_type n) const { return static_cast<reference>(it_[n]); }
+
+        bool operator==(IteratorImpl const& o) const { return it_ == o.it_; }
+        bool operator!=(IteratorImpl const& o) const { return it_ != o.it_; }
+        bool operator<(IteratorImpl const& o) const { return it_ < o.it_; }
+        bool operator>(IteratorImpl const& o) const { return it_ > o.it_; }
+        bool operator<=(IteratorImpl const& o) const { return it_ <= o.it_; }
+        bool operator>=(IteratorImpl const& o) const { return it_ >= o.it_; }
+    };
+
+    using iterator = IteratorImpl<false>;
+    using const_iterator = IteratorImpl<true>;
+
+    iterator begin() { return iterator(elements.begin()); }
+    iterator end() { return iterator(elements.end()); }
+    const_iterator begin() const { return const_iterator(elements.cbegin()); }
+    const_iterator end() const { return const_iterator(elements.cend()); }
+    const_iterator cbegin() const { return const_iterator(elements.cbegin()); }
+    const_iterator cend() const { return const_iterator(elements.cend()); }
 };
 
 /**
@@ -1231,6 +1304,89 @@ private:
     std::vector<Element> elements;
     mutable std::map<std::weak_ptr<ListenerToken::Impl>, MapListenerFunction, std::owner_less<std::weak_ptr<ListenerToken::Impl>>> mapListeners;
     mutable std::vector<Value::ListenerBinding> managedMapListeners;
+
+public:
+    /// The typed element type (Fundamental<T> for primitive T, Record<T> for struct T)
+    using ElementType = typename Element::Base;
+
+    /// Typed element access by key (asserts if key not found)
+    ElementType& operator()(std::string_view key)
+    {
+        auto it = std::find_if(elements.begin(), elements.end(),
+            [key](Element const& elem) { return elem.fieldName == key; });
+        assert(it != elements.end());
+        return *it;
+    }
+
+    /// Typed element access by key (const, asserts if key not found)
+    ElementType const& operator()(std::string_view key) const
+    {
+        auto it = std::find_if(elements.begin(), elements.end(),
+            [key](Element const& elem) { return elem.fieldName == key; });
+        assert(it != elements.end());
+        return *it;
+    }
+
+    /// Returns true if the map has no elements
+    bool empty() const { return elements.empty(); }
+
+    /// Returns true if the map contains an element with the given key
+    bool contains(std::string_view key) const
+    {
+        return std::find_if(elements.begin(), elements.end(),
+            [key](Element const& elem) { return elem.fieldName == key; }) != elements.end();
+    }
+
+    /// Iterator for typed element access
+    template <bool IsConst>
+    class IteratorImpl
+    {
+        friend class Map;
+        using VecIter = std::conditional_t<IsConst,
+            typename std::vector<Element>::const_iterator,
+            typename std::vector<Element>::iterator>;
+        VecIter it_;
+        explicit IteratorImpl(VecIter it) : it_(it) {}
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = std::conditional_t<IsConst, ElementType const, ElementType>;
+        using difference_type = std::ptrdiff_t;
+        using pointer = value_type*;
+        using reference = value_type&;
+
+        reference operator*() const { return *it_; }
+        pointer operator->() const { return static_cast<pointer>(&(*it_)); }
+
+        IteratorImpl& operator++() { ++it_; return *this; }
+        IteratorImpl operator++(int) { auto tmp = *this; ++it_; return tmp; }
+
+        bool operator==(IteratorImpl const& o) const { return it_ == o.it_; }
+        bool operator!=(IteratorImpl const& o) const { return it_ != o.it_; }
+    };
+
+    using iterator = IteratorImpl<false>;
+    using const_iterator = IteratorImpl<true>;
+
+    iterator begin() { return iterator(elements.begin()); }
+    iterator end() { return iterator(elements.end()); }
+    const_iterator begin() const { return const_iterator(elements.cbegin()); }
+    const_iterator end() const { return const_iterator(elements.cend()); }
+    const_iterator cbegin() const { return const_iterator(elements.cbegin()); }
+    const_iterator cend() const { return const_iterator(elements.cend()); }
+
+    /// Find an element by key
+    iterator find(std::string_view key)
+    {
+        return iterator(std::find_if(elements.begin(), elements.end(),
+            [key](Element const& elem) { return elem.fieldName == key; }));
+    }
+
+    /// Find an element by key (const)
+    const_iterator find(std::string_view key) const
+    {
+        return const_iterator(std::find_if(elements.begin(), elements.end(),
+            [key](Element const& elem) { return elem.fieldName == key; }));
+    }
 };
 
 /**
