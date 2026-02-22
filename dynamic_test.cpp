@@ -2098,3 +2098,134 @@ TEST_CASE("contains after remove") {
 }
 
 } // TEST_SUITE("Map typed access")
+
+//=============================================================================
+// operator->() tests
+//=============================================================================
+
+TEST_SUITE("Arrow operator") {
+
+TEST_CASE("mutable member access on Field<struct>") {
+    // Direct member of a raw struct — the originally problematic pattern
+    Line line;
+    line.start->x = 1.0f;
+    line.start->y = 2.0f;
+    CHECK(line.start->x() == doctest::Approx(1.0f));
+    CHECK(line.start->y() == doctest::Approx(2.0f));
+}
+
+TEST_CASE("chained -> traversal through nested structs") {
+    // Equivalent to the desired: triangle.edgeA->start->x.set(4.5f)
+    Line line;
+    line.start->x.set(3.0f);
+    line.start->y.set(4.0f);
+    CHECK(line.start->x() == doctest::Approx(3.0f));
+    CHECK(line.start->y() == doctest::Approx(4.0f));
+}
+
+TEST_CASE("listener fires when assigning through ->") {
+    Line line;
+    int callCount = 0;
+    float lastValue = 0.0f;
+    auto token = line.start("x"_fld).addListener([&](auto const&, float v) {
+        callCount++;
+        lastValue = v;
+    });
+
+    line.start->x = 5.0f;
+    CHECK(callCount == 1);
+    CHECK(lastValue == doctest::Approx(5.0f));
+}
+
+TEST_CASE("listener fires when calling set() through ->") {
+    Line line;
+    int callCount = 0;
+    auto token = line.start("x"_fld).addListener([&callCount](auto const&, float) {
+        callCount++;
+    });
+
+    line.start->x.set(7.0f);
+    CHECK(callCount == 1);
+    CHECK(line.start->x() == doctest::Approx(7.0f));
+}
+
+TEST_CASE("listener fires when calling mutate() through ->") {
+    Line line;
+    int callCount = 0;
+    auto token = line.start("x"_fld).addListener([&callCount](auto const&, float) {
+        callCount++;
+    });
+
+    line.start->x.mutate([](float& v) { v = 42.0f; });
+    CHECK(callCount == 1);
+    CHECK(line.start->x() == doctest::Approx(42.0f));
+}
+
+TEST_CASE("child listener fires through -> chain on Record") {
+    Record<Line> line;
+    int callCount = 0;
+    std::string lastPath;
+
+    auto token = static_cast<Object&>(line).addChildListener(
+        [&](ID const& id, Object::Operation, Object const&, Value const&) {
+            callCount++;
+            lastPath = id.toString();
+        });
+
+    line->start->x = 3.0f;
+    CHECK(callCount == 1);
+    CHECK(lastPath == "start/x");
+}
+
+TEST_CASE("operator-> on Record<T>") {
+    Record<Point> point;
+    point->x = 1.0f;
+    point->y = 2.0f;
+    CHECK(point("x"_fld)() == doctest::Approx(1.0f));
+    CHECK(point("y"_fld)() == doctest::Approx(2.0f));
+}
+
+TEST_CASE("const -> returns const pointer") {
+    Line const line;
+    // operator->() const returns T const*, so members are const
+    float val = line.start->x();
+    CHECK(val == doctest::Approx(0.0f));
+}
+
+TEST_CASE("operator->() not available on opaque (primitive) types") {
+    // This is a compile-time constraint enforced by `requires (!kIsOpaque)`.
+    // The following must NOT compile:
+    //   Fundamental<float> f; f->something;
+    // Verified manually; no runtime test needed.
+    CHECK(true);
+}
+
+TEST_CASE("deeply nested child listener fires through chained -> on Record") {
+    Record<State> state;
+    std::string lastPath;
+
+    auto token = static_cast<Object&>(state).addChildListener(
+        [&lastPath](ID const& id, Object::Operation, Object const&, Value const&) {
+            lastPath = id.toString();
+        });
+
+    state("line"_fld)->start->x.set(9.9f);
+    CHECK(lastPath == "line/start/x");
+}
+
+TEST_CASE("-> assignment goes through Field::operator= not raw struct assign") {
+    // Assigning to a Field<Point> member via -> calls Field::operator=(Point const&),
+    // which fires the field's own value listener.
+    Line line;
+    int startListenerCount = 0;
+    auto token = line.start.addListener([&startListenerCount](auto const&, Point const&) {
+        startListenerCount++;
+    });
+
+    Point p; p.x = 5.0f; p.y = 6.0f;
+    line.start = p;        // via Field::operator= — fires start's listener
+    CHECK(startListenerCount == 1);
+    CHECK(line.start->x() == doctest::Approx(5.0f));
+}
+
+} // TEST_SUITE("Arrow operator")

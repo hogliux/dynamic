@@ -59,9 +59,19 @@ struct Line {
 
 Record<Line> line;
 
-// Chain field access for nested structs
+// Chain field access using compile-time string selectors
 line("start"_fld)("x"_fld) = 1.0f;
 line("start"_fld)("y"_fld) = 2.0f;
+
+// Alternatively, use operator->() for IDE-friendly mutable member traversal.
+// Each -> dereferences the Dynamic wrapper to expose the raw struct's Field<> members.
+// All mutations still go through Field::operator= or set(), so listeners fire correctly.
+line->start->x = 1.0f;          // calls Field<float,"x">::operator=  — listener fires
+line->start->x.set(1.0f);       // calls set()                        — listener fires
+line->start->x.mutate([](float& v) { v *= 2.0f; });  // calls mutate() — listener fires
+
+// operator()() remains read-only — direct struct replacement is a compile error:
+// line->start() = myPoint;  // error: operator()() returns Point const&
 ```
 
 ### Runtime Field Iteration
@@ -251,7 +261,8 @@ Concrete implementation for struct types with extended features:
 ### Fundamental<T>
 
 Value container with change notification:
-- `operator()()` - get underlying value
+- `operator()()` - get underlying value (read-only, returns `T const&`)
+- `operator->()` - mutable member access for struct types (returns `T*`); not available for opaque/primitive types
 - `set(value)` - set value and notify listeners
 - `mutate(lambda)` - modify value via lambda and notify
 - `addListener()` - register change callback

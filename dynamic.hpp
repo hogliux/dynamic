@@ -588,6 +588,11 @@ public:
     /// Returns the underlying value (read-only access)
     T const& operator()() const { return underlying; }
 
+    /// Mutable member access for struct types — allows chaining through Field members
+    /// while preserving listener safety (mutations go through Field::operator= or set())
+    T*       operator->()       requires (!kIsOpaque) { return &underlying; }
+    T const* operator->() const requires (!kIsOpaque) { return &underlying; }
+
     /**
      * @brief Set the value and notify all listeners
      * @param newValue The new value to set
