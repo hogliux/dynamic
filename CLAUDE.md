@@ -113,6 +113,28 @@ point("x"_fld) = 3.14f;  // Compile-time verified field access
 
 This is implemented via a GNU string literal operator template (requires `-Wno-gnu-string-literal-operator-template` or `-Wno-pedantic` on Clang).
 
+### Mutable Member Access via `operator->()`
+
+`Fundamental<T>::operator()()` intentionally returns `T const&` to prevent callers from bypassing the listener system (e.g., `field() = value` would skip `set()` and no listener would fire). However, this also blocks legitimate mutable chaining through nested struct members.
+
+To solve this, `Fundamental<T>` provides `operator->()` for non-opaque (struct) types:
+
+```cpp
+T*       operator->()       requires (!kIsOpaque) { return &underlying; }
+T const* operator->() const requires (!kIsOpaque) { return &underlying; }
+```
+
+This allows IDE-friendly traversal through struct hierarchies while keeping listener safety intact — mutations must still go through `Field::operator=`, `set()`, or `mutate()` at the leaf field:
+
+```cpp
+line->start->x = 1.0f;          // Field::operator= fires listener ✓
+line->start->x.set(1.0f);       // set() fires listener ✓
+line->start->x.mutate([](float& v) { v *= 2.0f; });  // mutate() fires listener ✓
+line->start() = somePoint;       // compile error: operator()() returns const& ✓
+```
+
+Note: `->` is **not** available for opaque/primitive types (e.g., `Field<float, "x">`) — only for struct types where the underlying `T` contains `Field<>` members. Use `set()` or `operator=` directly on those.
+
 ## File Structure
 
 ### Core Files
@@ -148,6 +170,14 @@ using SupportedFundamentalTypes = std::tuple<
 
 ### Listener Implementation Notes
 
+**Timing: all listeners fire post-change**
+
+All listeners fire **after** the new value has been committed. This means:
+- `Fundamental<T>` value listeners can read the new value directly from the field reference passed to the callback — no separate `newValue` parameter is needed.
+- `Array`/`Map` add/modify listeners: the new element is already in the container when the listener fires.
+- `Array`/`Map` remove listeners: the element has already been erased, so it is passed as a by-value copy in the listener callback (it can no longer be found in the container).
+- Child listeners receive `Value const& changedValue` for the same reason: on remove, the value is gone from the parent, so it is passed explicitly.
+
 **Architecture:**
 - Listeners are stored directly as `std::unique_ptr<std::function<void(Args...)>>`
 - No base class abstraction - clean and simple storage
@@ -165,9 +195,15 @@ using SupportedFundamentalTypes = std::tuple<
    - Expired contexts cleaned up when adding new listeners
    - Lambda signature has no context parameter - capture `this` directly
 
+**Listener signatures:**
+- `Fundamental<T>` value listener: `void(Fundamental<T> const& field)` — read new value via `field()`
+- `Array<T>` listener: `void(Object::Operation, Array<T> const&, T const&, std::size_t index)`
+- `Map<T>` listener: `void(Object::Operation, Map<T> const&, T const&, std::string_view key)`
+- Child listener: `void(ID const& path, Object::Operation, Object const& parent, Value const& changedValue)`
+
 **Implementation details:**
 - `std::weak_ptr<void>` used for type-erased context storage
-- The `recursiveListenerDisabler` thread_local counter prevents infinite recursion
+- The `recursiveListenerDisabler` thread_local counter suppresses cascading sub-field listener fires when assigning a whole struct value (e.g., `field = someStruct` internally sets each member). The assignment is performed inside an RAII increment/decrement guard; listeners fire after the guard is released.
 - JUCE support via `Component::SafePointer` for component-based contexts
 
 ### MetaType System
@@ -247,8 +283,9 @@ for (auto& field : point.type_erased_fields()) {
 Record<Point> point;
 
 // Listener active while token is in scope
-auto token = point("x"_fld).addListener([](auto const& field, float newValue) {
-    std::cout << "x changed to: " << newValue << std::endl;
+// Listener fires post-change; read new value from the field reference
+auto token = point("x"_fld).addListener([](auto const& field) {
+    std::cout << "x changed to: " << field() << std::endl;
 });
 // Listener removed when token destroyed
 ```
