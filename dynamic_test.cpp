@@ -236,7 +236,7 @@ TEST_CASE("move assignment") {
 TEST_CASE("set does not fire if value unchanged") {
     Fundamental<int32_t> val(42);
     int callCount = 0;
-    auto token = val.addListener([&callCount](auto const&, auto const&) { callCount++; });
+    auto token = val.addListener([&callCount](auto const&) { callCount++; });
     val = 42; // same value
     CHECK(callCount == 0);
     val = 43; // different value
@@ -246,7 +246,7 @@ TEST_CASE("set does not fire if value unchanged") {
 TEST_CASE("float set with epsilon comparison") {
     Fundamental<float> val(1.0f);
     int callCount = 0;
-    auto token = val.addListener([&callCount](auto const&, auto const&) { callCount++; });
+    auto token = val.addListener([&callCount](auto const&) { callCount++; });
 
     // Setting the exact same value should not fire
     val = 1.0f;
@@ -261,9 +261,9 @@ TEST_CASE("mutate") {
     Fundamental<int32_t> val(10);
     int callCount = 0;
     int32_t notifiedValue = 0;
-    auto token = val.addListener([&](auto const&, int32_t const& newVal) {
+    auto token = val.addListener([&](auto const& f) {
         callCount++;
-        notifiedValue = newVal;
+        notifiedValue = f();
     });
 
     val.mutate([](int32_t& v) { v += 5; });
@@ -275,7 +275,7 @@ TEST_CASE("mutate") {
 TEST_CASE("mutate does not fire if value unchanged") {
     Fundamental<int32_t> val(10);
     int callCount = 0;
-    auto token = val.addListener([&callCount](auto const&, auto const&) { callCount++; });
+    auto token = val.addListener([&callCount](auto const&) { callCount++; });
 
     val.mutate([](int32_t& v) { (void)v; /* no change */ });
     CHECK(callCount == 0);
@@ -461,7 +461,7 @@ TEST_CASE("copy construction") {
 TEST_CASE("copy does not copy listeners") {
     Record<Point> original;
     int callCount = 0;
-    auto token = original("x"_fld).addListener([&callCount](auto const&, auto const&) { callCount++; });
+    auto token = original("x"_fld).addListener([&callCount](auto const&) { callCount++; });
 
     Record<Point> copy(original);
     copy("x"_fld) = 99.0f;
@@ -616,9 +616,9 @@ TEST_CASE("token-based value listener fires on change") {
     int callCount = 0;
     int32_t lastValue = 0;
 
-    auto token = val.addListener([&](Fundamental<int32_t> const&, int32_t const& newVal) {
+    auto token = val.addListener([&](Fundamental<int32_t> const& f) {
         callCount++;
-        lastValue = newVal;
+        lastValue = f();
     });
 
     val = 10;
@@ -635,7 +635,7 @@ TEST_CASE("token destruction removes listener") {
     int callCount = 0;
 
     {
-        auto token = val.addListener([&callCount](auto const&, auto const&) { callCount++; });
+        auto token = val.addListener([&callCount](auto const&) { callCount++; });
         val = 1;
         CHECK(callCount == 1);
     } // token destroyed here
@@ -648,7 +648,7 @@ TEST_CASE("ListenerToken move semantics") {
     Fundamental<int32_t> val(0);
     int callCount = 0;
 
-    ListenerToken token1 = val.addListener([&callCount](auto const&, auto const&) { callCount++; });
+    ListenerToken token1 = val.addListener([&callCount](auto const&) { callCount++; });
     ListenerToken token2 = std::move(token1);
 
     val = 1;
@@ -661,8 +661,8 @@ TEST_CASE("multiple listeners") {
     Fundamental<int32_t> val(0);
     int count1 = 0, count2 = 0;
 
-    auto token1 = val.addListener([&count1](auto const&, auto const&) { count1++; });
-    auto token2 = val.addListener([&count2](auto const&, auto const&) { count2++; });
+    auto token1 = val.addListener([&count1](auto const&) { count1++; });
+    auto token2 = val.addListener([&count2](auto const&) { count2++; });
 
     val = 5;
     CHECK(count1 == 1);
@@ -677,7 +677,7 @@ TEST_CASE("weak_ptr-based listener fires") {
     auto ctx = std::make_shared<Context>();
     Fundamental<int32_t> val(0);
 
-    val.addListener(ctx.get(), [&ctx](auto const&, auto const&) {
+    val.addListener(ctx.get(), [&ctx](auto const&) {
         ctx->callCount++;
     });
 
@@ -693,7 +693,7 @@ TEST_CASE("weak_ptr-based listener stops when context destroyed") {
         struct Context : std::enable_shared_from_this<Context> {};
         auto ctx = std::make_shared<Context>();
 
-        val.addListener(ctx.get(), [&callCount](auto const&, auto const&) {
+        val.addListener(ctx.get(), [&callCount](auto const&) {
             callCount++;
         });
 
@@ -772,9 +772,9 @@ TEST_CASE("listener on bool value") {
     int callCount = 0;
     bool lastValue = false;
 
-    auto token = val.addListener([&](auto const&, bool const& newVal) {
+    auto token = val.addListener([&](auto const& f) {
         callCount++;
-        lastValue = newVal;
+        lastValue = static_cast<bool>(f);
     });
 
     val = true;
@@ -791,7 +791,7 @@ TEST_CASE("listener on ID value") {
     val = ID::fromString("initial");
     int callCount = 0;
 
-    auto token = val.addListener([&callCount](auto const&, ID const&) {
+    auto token = val.addListener([&callCount](auto const&) {
         callCount++;
     });
 
@@ -804,8 +804,8 @@ TEST_CASE("listener on string value") {
     val = std::string("hello");
     std::string lastValue;
 
-    auto token = val.addListener([&lastValue](auto const&, std::string const& newVal) {
-        lastValue = newVal;
+    auto token = val.addListener([&lastValue](auto const& f) {
+        lastValue = f();
     });
 
     val = std::string("world");
@@ -2127,9 +2127,9 @@ TEST_CASE("listener fires when assigning through ->") {
     Line line;
     int callCount = 0;
     float lastValue = 0.0f;
-    auto token = line.start("x"_fld).addListener([&](auto const&, float v) {
+    auto token = line.start("x"_fld).addListener([&](auto const& f) {
         callCount++;
-        lastValue = v;
+        lastValue = f();
     });
 
     line.start->x = 5.0f;
@@ -2140,7 +2140,7 @@ TEST_CASE("listener fires when assigning through ->") {
 TEST_CASE("listener fires when calling set() through ->") {
     Line line;
     int callCount = 0;
-    auto token = line.start("x"_fld).addListener([&callCount](auto const&, float) {
+    auto token = line.start("x"_fld).addListener([&callCount](auto const&) {
         callCount++;
     });
 
@@ -2152,7 +2152,7 @@ TEST_CASE("listener fires when calling set() through ->") {
 TEST_CASE("listener fires when calling mutate() through ->") {
     Line line;
     int callCount = 0;
-    auto token = line.start("x"_fld).addListener([&callCount](auto const&, float) {
+    auto token = line.start("x"_fld).addListener([&callCount](auto const&) {
         callCount++;
     });
 
@@ -2218,7 +2218,7 @@ TEST_CASE("-> assignment goes through Field::operator= not raw struct assign") {
     // which fires the field's own value listener.
     Line line;
     int startListenerCount = 0;
-    auto token = line.start.addListener([&startListenerCount](auto const&, Point const&) {
+    auto token = line.start.addListener([&startListenerCount](auto const&) {
         startListenerCount++;
     });
 

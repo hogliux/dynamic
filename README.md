@@ -111,6 +111,9 @@ value.visit([](auto& v) {
 
 ### Simple Value Listener
 
+Listeners fire **after** the change has been applied, so you can read the new
+value directly from the field reference passed to the callback.
+
 ```cpp
 struct Application : std::enable_shared_from_this<Application> {
     void setup() {
@@ -118,8 +121,8 @@ struct Application : std::enable_shared_from_this<Application> {
 
         // Listen for changes to a specific field
         point("x"_fld).addListener(this,
-            [](std::shared_ptr<Application> ctx, auto const& field, float const& newValue) {
-                std::cout << "X changed to: " << newValue << std::endl;
+            [](auto const& field) {
+                std::cout << "X changed to: " << field() << std::endl;
             }
         );
 
@@ -130,7 +133,7 @@ struct Application : std::enable_shared_from_this<Application> {
 
 ### Hierarchical Child Listeners
 
-Child listeners allow you to observe changes to any field within a struct hierarchy, including deeply nested fields.
+Child listeners allow you to observe changes to any field within a struct hierarchy, including deeply nested fields. They also fire **after** the change. For `add` and `modify`, the new value is already reflected in `parent`; for `remove`, the removed value is passed via `changedValue` (it is no longer in `parent`).
 
 ```cpp
 struct State {
@@ -142,8 +145,7 @@ Record<State> state;
 
 // Listen to all changes within the state hierarchy
 state.addChildListener(this,
-    [](std::shared_ptr<Application> ctx,
-       ID const& path,
+    [](ID const& path,
        Object::Operation op,
        Object const& parent,
        Value const& changedValue) {
@@ -155,10 +157,10 @@ state.addChildListener(this,
                 std::cout << "Value modified: " << changedValue << std::endl;
                 break;
             case Object::Operation::add:
-                std::cout << "Element added" << std::endl;
+                std::cout << "Element added: " << changedValue << std::endl;
                 break;
             case Object::Operation::remove:
-                std::cout << "Element removed" << std::endl;
+                std::cout << "Element removed: " << changedValue << std::endl;
                 break;
         }
     }

@@ -57,7 +57,7 @@ struct Application : std::enable_shared_from_this<Application>
 
         state("points"_fld).addListener(this, [] (Object::Operation, Array<Point> const& array, Point const& newValue, std::size_t idx)
         {
-            std::cout << "Fundamental { .x = " << newValue.x << ", .y = " << newValue.y << " } will be added to array " << array << " at index " << idx << std::endl;
+            std::cout << "Fundamental { .x = " << newValue.x << ", .y = " << newValue.y << " } was added to array " << array << " at index " << idx << std::endl;
         });
 
         state.addChildListener(this, [] (ID const& id, Object::Operation op,  Object const& parent, Value const & value)
@@ -66,18 +66,17 @@ struct Application : std::enable_shared_from_this<Application>
             {
             case Object::Operation::add:
             {
-                std::cout << "Fundamental \"" << value << "\" will be added to array \"" << parent << "\" at ID \"" << id.toString() << "\"" << std::endl;
+                std::cout << "Fundamental \"" << value << "\" was added to \"" << parent << "\" at ID \"" << id.toString() << "\"" << std::endl;
                 break;
             }
             case Object::Operation::remove:
             {
-                std::cout << "Fundamental \"" << value << "\" will be removed from array \"" << parent << "\" at ID \"" << id.toString() << "\"" << std::endl;
+                std::cout << "Fundamental \"" << value << "\" was removed from \"" << parent << "\" at ID \"" << id.toString() << "\"" << std::endl;
                 break;
             }
             case Object::Operation::modify:
             {
-                auto const& oldValue = parent(id.back());
-                std::cout << "Fundamental at \"" << id.toString() << "\" changed from \"" << oldValue << "\" to \"" << value << "\"" << std::endl;
+                std::cout << "Fundamental at \"" << id.toString() << "\" changed to \"" << value << "\"" << std::endl;
                 break;
             }
             default: break;

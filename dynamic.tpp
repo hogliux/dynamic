@@ -269,31 +269,35 @@ void Fundamental<T>::set(T const& newValue)
             return;
     }
 
-    if (Value::recursiveListenerDisabler == 0)
-        callListeners(newValue);
+    {
+        ++Value::recursiveListenerDisabler;
+        auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                          [] (std::false_type)
+                                                          {
+                                                              --Value::recursiveListenerDisabler;
+                                                          });
+        underlying = newValue;
+    }
 
-    ++Value::recursiveListenerDisabler;
-    auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
-                                                      [] (std::false_type)
-                                                      {
-                                                          --Value::recursiveListenerDisabler;
-                                                      });
-    underlying = newValue;
+    if (Value::recursiveListenerDisabler == 0)
+        callListeners();
 }
 
 template <typename T>
 void Fundamental<T>::set(T && newValue)
 {
-    if (Value::recursiveListenerDisabler == 0)
-        callListeners(newValue);
+    {
+        ++Value::recursiveListenerDisabler;
+        auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                          [] (std::false_type)
+                                                          {
+                                                              --Value::recursiveListenerDisabler;
+                                                          });
+        underlying = std::move(newValue);
+    }
 
-    ++Value::recursiveListenerDisabler;
-    auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
-                                                      [] (std::false_type)
-                                                      {
-                                                          --Value::recursiveListenerDisabler;
-                                                      });
-    underlying = std::move(newValue);
+    if (Value::recursiveListenerDisabler == 0)
+        callListeners();
 }
 
 template <typename T>
@@ -313,21 +317,23 @@ void Fundamental<T>::mutate(Lambda && lambda)
 
     if (changed)
     {
-        if (Value::recursiveListenerDisabler == 0)
-            callListeners(copy);
+        {
+            ++Value::recursiveListenerDisabler;
+            auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
+                                                              [] (std::false_type)
+                                                              {
+                                                                  --Value::recursiveListenerDisabler;
+                                                              });
+            underlying = std::move(copy);
+        }
 
-        ++Value::recursiveListenerDisabler;
-        auto raiiDecrementer = cxxutils::callAtEndOfScope(std::false_type(),
-                                                        [] (std::false_type)
-                                                        {
-                                                            --Value::recursiveListenerDisabler;
-                                                        });
-        underlying = std::move(copy);
+        if (Value::recursiveListenerDisabler == 0)
+            callListeners();
     }
 }
 
 template <typename T>
-template <std::invocable<Fundamental<T> const&, T const&> Lambda>
+template <std::invocable<Fundamental<T> const&> Lambda>
 ListenerToken Fundamental<T>::addListener(Lambda && lambda) const
 {
     ListenerToken token(ListenerToken::private_constructor_t{});
@@ -338,14 +344,14 @@ ListenerToken Fundamental<T>::addListener(Lambda && lambda) const
 }
 
 template <typename T>
-template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
+template <class Context, std::invocable<Fundamental<T> const&> Lambda>
 void Fundamental<T>::addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const
 {
     addListener(context->weak_from_this(), std::move(lambda));
 }
 
 template <typename T>
-template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
+template <class Context, std::invocable<Fundamental<T> const&> Lambda>
 void Fundamental<T>::addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const
 {
     // Clean up expired managed listeners first
@@ -357,10 +363,10 @@ void Fundamental<T>::addListener(std::weak_ptr<Context>&& context, Lambda && lam
 
     // Capture the weak_ptr and wrap the lambda
     auto wrappedLambda = [weakCtx = context, userLambda = std::move(lambda)]
-                        (Fundamental<T> const& fund, T const& newValue)
+                        (Fundamental<T> const& fund)
     {
         if (auto ctx = weakCtx.lock())
-            userLambda(fund, newValue);
+            userLambda(fund);
     };
 
     // Add the token-based listener and store the token
@@ -370,7 +376,7 @@ void Fundamental<T>::addListener(std::weak_ptr<Context>&& context, Lambda && lam
 
 #if JUCE_SUPPORT
 template <typename T>
-template <class ComponentType, std::invocable<Fundamental<T> const&, T const&> Lambda>
+template <class ComponentType, std::invocable<Fundamental<T> const&> Lambda>
 void Fundamental<T>::addListener(ComponentType* context, Lambda && lambda) const requires std::is_base_of_v<juce::Component, ComponentType>
 {
     // Clean up expired managed listeners first
@@ -383,10 +389,10 @@ void Fundamental<T>::addListener(ComponentType* context, Lambda && lambda) const
     // Create a SafePointer and wrap the lambda
     juce::Component::SafePointer<ComponentType> safeContext(context);
     auto wrappedLambda = [safeContext, userLambda = std::move(lambda)]
-                        (Fundamental<T> const& fund, T const& newValue)
+                        (Fundamental<T> const& fund)
     {
         if (auto* comp = safeContext.getComponent())
-            userLambda(fund, newValue);
+            userLambda(fund);
     };
 
     // Add the token-based listener and store the token
@@ -453,7 +459,7 @@ void Fundamental<T>::DynamicValueSource::setValue(juce::var const& newVar)
 #endif
 
 template <typename T>
-void Fundamental<T>::callListeners(T newValue)
+void Fundamental<T>::callListeners()
 {
     std::erase_if(valueListeners, [] (auto const& p) { return p.first.expired(); });
 
@@ -463,13 +469,12 @@ void Fundamental<T>::callListeners(T newValue)
         if (token.expired())
             continue;
 
-        listener(*this, newValue);
+        listener(*this);
     }
 
     if (Base::parent != nullptr)
     {
-        std::conditional_t<kIsOpaque, Fundamental<T>, Record<T>> newValueTypeErased(newValue);
-        Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->fieldname())), Object::Operation::modify, *Base::parent, newValueTypeErased);
+        Base::parent->callChildListeners(std::vector<std::string>(1, std::string(this->fieldname())), Object::Operation::modify, *Base::parent, *this);
     }
 
 #if JUCE_SUPPORT
@@ -709,23 +714,24 @@ std::vector<std::reference_wrapper<Value>> Array<T>::typeErasedFields()
 template <typename T>
 void Array<T>::addElement(T const& element)
 {
-    callListeners(Operation::add, element, elements.size());
     elements.emplace_back(*this, element);
+    callListeners(Operation::add, elements.back()(), elements.size() - 1);
 }
 
 template <typename T>
 void Array<T>::addElement(T&& element)
 {
-    callListeners(Operation::add, element, elements.size());
     elements.emplace_back(*this, std::move(element));
+    callListeners(Operation::add, elements.back()(), elements.size() - 1);
 }
 
 template <typename T>
 void Array<T>::removeElement(std::size_t idx)
 {
     assert(idx < elements.size());
-    callListeners(Operation::remove, elements[idx], elements.size());
+    T removedValue = elements[idx]();
     elements.erase(elements.begin() + static_cast<int>(idx));
+    callListeners(Operation::remove, removedValue, idx);
 }
 
 template <typename T>
@@ -1013,8 +1019,8 @@ void Map<T>::addElement(std::string_view key, T const& element)
         return;
     }
 
-    callListeners(Operation::add, element, key);
     elements.emplace_back(key, *this, element);
+    callListeners(Operation::add, elements.back()(), key);
 }
 
 template <typename T>
@@ -1026,8 +1032,8 @@ void Map<T>::addElement(std::string_view key, T&& element)
         return;
     }
 
-    callListeners(Operation::add, element, key);
     elements.emplace_back(key, *this, std::move(element));
+    callListeners(Operation::add, elements.back()(), key);
 }
 
 template <typename T>
@@ -1038,8 +1044,9 @@ bool Map<T>::removeElement(std::string_view key)
     if (it == elements.end())
         return false;
 
-    callListeners(Operation::remove, *it, key);
+    T removedValue = (*it)();
     elements.erase(it);
+    callListeners(Operation::remove, removedValue, key);
     return true;
 }
 

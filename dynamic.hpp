@@ -625,7 +625,7 @@ public:
      * @param lambda Callback: (Fundamental<T> const&, T const& newValue)
      * @return ListenerToken that removes the listener when destroyed
      */
-    template <std::invocable<Fundamental<T> const&, T const&> Lambda>
+    template <std::invocable<Fundamental<T> const&> Lambda>
     ListenerToken addListener(Lambda && lambda) const;
 
     /**
@@ -638,14 +638,14 @@ public:
      * @param context Pointer to the listener owner
      * @param lambda Callback: (Fundamental<T> const&, T const& newValue)
      */
-    template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
+    template <class Context, std::invocable<Fundamental<T> const&> Lambda>
     void addListener(std::enable_shared_from_this<Context>* context, Lambda && lambda) const;
 
-    template <class Context, std::invocable<Fundamental<T> const&, T const&> Lambda>
+    template <class Context, std::invocable<Fundamental<T> const&> Lambda>
     void addListener(std::weak_ptr<Context>&& context, Lambda && lambda) const;
 
    #if JUCE_SUPPORT
-    template <class ComponentType, std::invocable<Fundamental<T> const&, T const&> Lambda>
+    template <class ComponentType, std::invocable<Fundamental<T> const&> Lambda>
     void addListener(ComponentType* context, Lambda && lambda) const requires std::is_base_of_v<juce::Component, ComponentType>;
    #endif
 
@@ -657,9 +657,9 @@ public:
    #endif
 
 protected:
-    using ValueListenerFunction = std::function<void(Fundamental<T> const&, T const&)>;
+    using ValueListenerFunction = std::function<void(Fundamental<T> const&)>;
 
-    void callListeners(T newValue);
+    void callListeners();
 
     typename Value::TypesVariant visit_helper() override;
     typename Value::ConstTypesVariant visit_helper() const override;
